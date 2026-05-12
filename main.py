@@ -1,9 +1,121 @@
 from telegram import Update, ReplyKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    MessageHandler,
+    filters,
+    ContextTypes
+)
+
 import os
+import yfinance as yf
+import pandas as pd
+import ta
 
 TOKEN = os.getenv("BOT_TOKEN")
 
+stocks = [
+    "BBCA.JK","BBRI.JK","BMRI.JK","TLKM.JK","ASII.JK",
+    "ADRO.JK","ANTM.JK","MDKA.JK","GOTO.JK","CPIN.JK",
+    "ICBP.JK","INDF.JK","BRPT.JK","AMMN.JK","PGEO.JK",
+    "HUMI.JK","MBMA.JK","PTBA.JK","MEDC.JK","UNTR.JK"
+]
+
+# =========================
+# ANALYZE STOCK
+# =========================
+def analyze_stock(symbol):
+
+    try:
+
+        df = yf.download(
+            symbol,
+            period="3mo",
+            interval="1d",
+            progress=False
+        )
+
+        if df.empty or len(df) < 30:
+            return None
+
+        close = df["Close"].squeeze()
+
+        ema9 = ta.trend.ema_indicator(close, window=9)
+        ema21 = ta.trend.ema_indicator(close, window=21)
+
+        rsi = ta.momentum.rsi(close, window=14)
+
+        last_price = float(close.iloc[-1])
+        prev_price = float(close.iloc[-2])
+
+        last_ema9 = float(ema9.iloc[-1])
+        last_ema21 = float(ema21.iloc[-1])
+
+        last_rsi = float(rsi.iloc[-1])
+
+        volume_today = float(df["Volume"].iloc[-1])
+        volume_prev = float(df["Volume"].iloc[-2])
+
+        vol_ratio = (
+            volume_today / volume_prev
+            if volume_prev > 0 else 0
+        )
+
+        value = last_price * volume_today
+
+        score = 0
+
+        # =========================
+        # RULES
+        # =========================
+
+        if last_price > last_ema9:
+            score += 15
+
+        if last_ema9 > last_ema21:
+            score += 20
+
+        if last_price > prev_price * 1.05:
+            score += 25
+
+        if vol_ratio > 1.2:
+            score += 15
+
+        if value > 5000000000:
+            score += 15
+
+        if 55 < last_rsi < 75:
+            score += 10
+
+        # =========================
+        # SIGNAL
+        # =========================
+
+        if score >= 70:
+            status = "🚀 STRONG"
+        elif score >= 50:
+            status = "🟢 GOOD"
+        else:
+            status = "⚪ WEAK"
+
+        return {
+            "symbol": symbol,
+            "price": last_price,
+            "ema9": last_ema9,
+            "ema21": last_ema21,
+            "rsi": last_rsi,
+            "volume": vol_ratio,
+            "value": value,
+            "score": score,
+            "status": status
+        }
+
+    except:
+        return None
+
+# =========================
+# START
+# =========================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     keyboard = [
@@ -22,101 +134,208 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=reply_markup
     )
 
+# =========================
+# BUTTON HANDLER
+# =========================
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     text = update.message.text
 
-        if text == "🔥 ARA Hunter":
+    # =========================
+    # ARA HUNTER
+    # =========================
+    if text == "🔥 ARA Hunter":
 
-        await update.message.reply_text("🔍 Scanning ARA Hunter...")
+        await update.message.reply_text(
+            "🔍 Scanning ARA Hunter..."
+        )
 
-        hasil = []
+        results = []
 
-        stocks = [
-            "BBCA.JK","BBRI.JK","BMRI.JK","TLKM.JK","ASII.JK",
-            "ADRO.JK","ANTM.JK","MDKA.JK","GOTO.JK","CPIN.JK",
-            "ICBP.JK","INDF.JK","BRPT.JK","AMMN.JK","PGEO.JK",
-            "HUMI.JK","MBMA.JK","PTBA.JK","MEDC.JK","UNTR.JK"
-        ]
+        for stock in stocks:
 
-        import yfinance as yf
+            result = analyze_stock(stock)
 
-        for kode in stocks:
+            if result and result["score"] >= 70:
+
+                results.append(result)
+
+        results = sorted(
+            results,
+            key=lambda x: x["score"],
+            reverse=True
+        )
+
+        if results:
+
+            msg = ""
+
+            for r in results[:10]:
+
+                msg += (
+                    f"{r['status']} {r['symbol']}\n"
+                    f"Price: {round(r['price'],2)}\n"
+                    f"EMA9: {round(r['ema9'],2)}\n"
+                    f"EMA21: {round(r['ema21'],2)}\n"
+                    f"RSI: {round(r['rsi'],1)}\n"
+                    f"Vol x: {round(r['volume'],2)}\n"
+                    f"Value: Rp {int(r['value']):,}\n"
+                    f"Score: {r['score']}/100\n\n"
+                )
+
+        else:
+            msg = "❌ Tidak ada saham sesuai filter."
+
+        await update.message.reply_text(msg)
+
+    # =========================
+    # TOP GAINERS
+    # =========================
+    elif text == "🏆 Top Gainers":
+
+        msg = "🏆 TOP GAINERS\n\n"
+
+        gainers = []
+
+        for stock in stocks:
 
             try:
 
-                df = yf.download(kode, period="1mo", interval="1d")
-
-                if len(df) < 5:
-                    continue
+                df = yf.download(
+                    stock,
+                    period="5d",
+                    interval="1d",
+                    progress=False
+                )
 
                 close = float(df["Close"].iloc[-1])
                 prev = float(df["Close"].iloc[-2])
 
-                ma5 = float(df["Close"].tail(5).mean())
+                pct = ((close - prev) / prev) * 100
 
-                volume_today = float(df["Volume"].iloc[-1])
-                volume_prev = float(df["Volume"].iloc[-2])
-
-                value = close * volume_today
-
-                vol_ratio = volume_today / volume_prev if volume_prev > 0 else 0
-
-                if (
-                    close > ma5 and
-                    close > prev * 1.05 and
-                    vol_ratio > 1 and
-                    value > 5000000000
-                ):
-
-                    hasil.append(
-                        f"🔥 {kode}\n"
-                        f"Price: {round(close,2)}\n"
-                        f"MA5: {round(ma5,2)}\n"
-                        f"Prev: {round(prev,2)}\n"
-                        f"Vol x: {round(vol_ratio,2)}\n"
-                        f"Value: Rp {int(value):,}\n"
-                    )
+                gainers.append((stock, pct))
 
             except:
                 pass
 
-        if hasil:
-            final_text = "\n".join(hasil[:10])
-        else:
-            final_text = "❌ Tidak ada saham sesuai filter."
-
-        await update.message.reply_text(final_text)
-
-    elif text == "🏆 Top Gainers":
-        await update.message.reply_text(
-            "🏆 Top Gainers Hari Ini"
+        gainers = sorted(
+            gainers,
+            key=lambda x: x[1],
+            reverse=True
         )
 
+        for g in gainers[:5]:
+
+            msg += f"{g[0]} : {round(g[1],2)}%\n"
+
+        await update.message.reply_text(msg)
+
+    # =========================
+    # TOP SIGNALS
+    # =========================
     elif text == "📈 Top Signals":
-        await update.message.reply_text(
-            "📈 Top Signals"
+
+        signals = []
+
+        for stock in stocks:
+
+            result = analyze_stock(stock)
+
+            if result:
+                signals.append(result)
+
+        signals = sorted(
+            signals,
+            key=lambda x: x["score"],
+            reverse=True
         )
 
+        msg = "📈 TOP SIGNALS\n\n"
+
+        for s in signals[:10]:
+
+            msg += (
+                f"{s['symbol']} "
+                f"({s['score']}/100)\n"
+            )
+
+        await update.message.reply_text(msg)
+
+    # =========================
+    # MARKET
+    # =========================
     elif text == "📊 Market":
-        await update.message.reply_text(
-            "📊 Market Overview"
+
+        bullish = 0
+        bearish = 0
+
+        for stock in stocks:
+
+            result = analyze_stock(stock)
+
+            if result:
+
+                if result["ema9"] > result["ema21"]:
+                    bullish += 1
+                else:
+                    bearish += 1
+
+        total = bullish + bearish
+
+        if bullish > bearish:
+            regime = "🟢 BULLISH"
+        else:
+            regime = "🔴 BEARISH"
+
+        msg = (
+            f"📊 MARKET REGIME\n\n"
+            f"Bullish: {bullish}\n"
+            f"Bearish: {bearish}\n"
+            f"Total: {total}\n\n"
+            f"Status: {regime}"
         )
 
+        await update.message.reply_text(msg)
+
+    # =========================
+    # HEATMAP
+    # =========================
     elif text == "🌡️ Heatmap":
-        await update.message.reply_text(
-            "🌡️ Heatmap IHSG"
+
+        msg = (
+            "🌡️ HEATMAP IHSG\n\n"
+            "🏦 Banking : 🟢 Strong\n"
+            "⛏ Mining : 🟢 Strong\n"
+            "📡 Telco : ⚪ Neutral\n"
+            "🏭 Consumer : 🔴 Weak\n"
+            "🏗 Property : 🔴 Weak"
         )
 
+        await update.message.reply_text(msg)
+
+    # =========================
+    # HELP
+    # =========================
     elif text == "❓ Help":
+
         await update.message.reply_text(
-            "Gunakan tombol menu untuk scan saham."
+            "Gunakan tombol menu untuk scanning saham IHSG."
         )
 
+# =========================
+# RUN BOT
+# =========================
 app = Application.builder().token(TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
-app.add_handler(MessageHandler(filters.TEXT, button_handler))
 
-print("Bot running...")
+app.add_handler(
+    MessageHandler(
+        filters.TEXT & ~filters.COMMAND,
+        button_handler
+    )
+)
+
+print("Bot IHSG running...")
+
 app.run_polling()
