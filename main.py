@@ -1,71 +1,68 @@
-from telegram import ReplyKeyboardMarkup
+from telegram import Update, ReplyKeyboardMarkup
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+import os
+
+TOKEN = os.getenv("BOT_TOKEN")
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-keyboard = [
-    ["🔥 ARA Hunter", "🏆 Top Gainers"],
-    ["📈 Top Signals", "📊 Market"],
-    ["🌡 Heatmap", "❓ Help"]
-]
+    keyboard = [
+        ["🔥 ARA Hunter", "🏆 Top Gainers"],
+        ["📈 Top Signals", "📊 Market"],
+        ["🌡️ Heatmap", "❓ Help"]
+    ]
 
-reply_markup = ReplyKeyboardMarkup(
-    keyboard,
-    resize_keyboard=True
-)
+    reply_markup = ReplyKeyboardMarkup(
+        keyboard,
+        resize_keyboard=True
+    )
 
-await update.message.reply_text(
-    "📈 IHSG Scanner Bot Aktif",
-    reply_markup=reply_markup
-)
+    await update.message.reply_text(
+        "📈 IHSG Scanner Bot Aktif",
+        reply_markup=reply_markup
+    )
+
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-text = update.message.text
+    text = update.message.text
 
-if text == "🔥 ARA Hunter":
+    if text == "🔥 ARA Hunter":
+        await update.message.reply_text(
+            "🔥 ARA Hunter Scan\n\n"
+            "BBRI.JK\n"
+            "BMRI.JK\n"
+            "TLKM.JK"
+        )
 
-    await update.message.reply_text(
-        "🔥 Scanning ARA Hunter...\n\n"
-        "Rules:\n"
-        "✅ Price > MA5\n"
-        "✅ Gap Up > 5%\n"
-        "✅ Price > Open\n"
-        "✅ Volume Spike\n"
-        "✅ Value > 5B"
-    )
+    elif text == "🏆 Top Gainers":
+        await update.message.reply_text(
+            "🏆 Top Gainers Hari Ini"
+        )
 
-elif text == "🏆 Top Gainers":
+    elif text == "📈 Top Signals":
+        await update.message.reply_text(
+            "📈 Top Signals"
+        )
 
-    await update.message.reply_text(
-        "🏆 Top Gainers IHSG"
-    )
+    elif text == "📊 Market":
+        await update.message.reply_text(
+            "📊 Market Overview"
+        )
 
-elif text == "📈 Top Signals":
+    elif text == "🌡️ Heatmap":
+        await update.message.reply_text(
+            "🌡️ Heatmap IHSG"
+        )
 
-    await scan(update, context)
+    elif text == "❓ Help":
+        await update.message.reply_text(
+            "Gunakan tombol menu untuk scan saham."
+        )
 
-elif text == "📊 Market":
+app = Application.builder().token(TOKEN).build()
 
-    await update.message.reply_text(
-        "📊 Market Overview"
-    )
-
-elif text == "🌡 Heatmap":
-
-    await update.message.reply_text(
-        "🌡 Heatmap Market"
-    )
-
-elif text == "❓ Help":
-
-    await update.message.reply_text(
-        "Gunakan menu tombol untuk scan market."
-    )
-  from telegram.ext import MessageHandler, filters
 app.add_handler(CommandHandler("start", start))
-app.add_handler(CommandHandler("scan", scan))
+app.add_handler(MessageHandler(filters.TEXT, button_handler))
 
-app.add_handler(
-    MessageHandler(
-        filters.TEXT & ~filters.COMMAND,
-        button_handler
-    )
-)
+print("Bot running...")
+app.run_polling()
