@@ -216,7 +216,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"Vol Ratio: {r['VolRatio']}x\n\n"
             )
 
-        await update.message.reply_text(msg)
+        chart = generate_chart(r['Ticker'] + ".JK")
+
+        with open(chart, "rb") as photo:
+
+    await update.message.reply_photo(
+        photo=photo,
+        caption=msg
+    )
     # =========================
     # TOP SIGNALS
     # =========================
