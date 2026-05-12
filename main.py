@@ -13,7 +13,7 @@ import pandas as pd
 import ta
 
 from screener import run_screener
-
+from chart import generate_chart
 TOKEN = os.getenv("BOT_TOKEN")
 
 stocks = [
