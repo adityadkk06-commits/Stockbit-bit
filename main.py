@@ -197,7 +197,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
          results = run_screener()
 
-             if len(results) == 0:
+        if len(results) == 0:
 
         await update.message.reply_text(
             "No stocks passed screener."
