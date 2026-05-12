@@ -12,6 +12,8 @@ import yfinance as yf
 import pandas as pd
 import ta
 
+from screener import run_screener
+
 TOKEN = os.getenv("BOT_TOKEN")
 
 stocks = [
@@ -193,43 +195,27 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # =========================
     elif text == "🏆 Top Gainers":
 
-        msg = "🏆 TOP GAINERS\n\n"
+            results = run_screener()
+            if len(results) == 0:
 
-        gainers = []
-
-        for stock in stocks:
-
-            try:
-
-                df = yf.download(
-                    stock,
-                    period="5d",
-                    interval="1d",
-                    progress=False
-                )
-
-                close = float(df["Close"].iloc[-1])
-                prev = float(df["Close"].iloc[-2])
-
-                pct = ((close - prev) / prev) * 100
-
-                gainers.append((stock, pct))
-
-            except:
-                pass
-
-        gainers = sorted(
-            gainers,
-            key=lambda x: x[1],
-            reverse=True
+                await update.message.reply_text(
+            "No stocks passed screener."
         )
 
-        for g in gainers[:5]:
+     else:
 
-            msg += f"{g[0]} : {round(g[1],2)}%\n"
+        msg = "🏆 TOP GAINERS\n\n"
+
+        for r in results:
+
+            msg += (
+                f"📈 {r['Ticker']}\n"
+                f"Price: Rp {r['Price']}\n"
+                f"Change: +{r['Change%']}%\n"
+                f"Vol Ratio: {r['VolRatio']}x\n\n"
+            )
 
         await update.message.reply_text(msg)
-
     # =========================
     # TOP SIGNALS
     # =========================
