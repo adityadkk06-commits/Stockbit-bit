@@ -2,6 +2,8 @@ from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import (
     Application,
     CommandHandler,
+    MessageHandler,
+    Filters,
     ContextTypes
 )
 
@@ -103,6 +105,30 @@ async def bandarmology(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     await update.message.reply_text(message)
+
+# ==========================================
+# HANDLE BUTTON
+# ==========================================
+
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    text = update.message.text
+
+    # ======================================
+    # SCREENER
+    # ======================================
+
+    if text == "📈 Screener":
+
+        await screener(update, context)
+
+    # ======================================
+    # BANDARMOLOGY
+    # ======================================
+
+    elif text == "🏦 Bandarmology":
+
+        await bandarmology(update, context)
 
 # ==========================================
 # MAIN
