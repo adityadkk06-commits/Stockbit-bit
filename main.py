@@ -70,6 +70,41 @@ async def screener(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ==========================================
+# BANDARMOLOGY BUTTON
+# ==========================================
+
+async def bandarmology(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    await update.message.reply_text(
+        "Scanning bandar accumulation..."
+    )
+
+    results = run_bandarmology()
+
+    if not results:
+
+        await update.message.reply_text(
+            "Tidak ada saham bandar accumulation"
+        )
+
+        return
+
+    message = "🏦 BANDARMOLOGY\n\n"
+
+    for stock in results[:10]:
+
+        message += (
+            f"{stock['symbol']}\n"
+            f"Price : {stock['price']}\n"
+            f"Accumulation : {stock['accumulation']}\n"
+            f"Value : {stock['value']:,}\n"
+            f"TP : {stock['tp']}\n"
+            f"SL : {stock['sl']}\n\n"
+        )
+
+    await update.message.reply_text(message)
+
+# ==========================================
 # MAIN
 # ==========================================
 
