@@ -1,5 +1,4 @@
-import 
- os
+import os
 
 # ─────────────────────────────────────────
 # Telegram Bot Token (from environment)
