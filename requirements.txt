@@ -1,1 +1,8 @@
-python-telegram-bot==21.6
+python-telegram-bot==20.6
+pandas
+numpy
+yfinance
+ta
+requests
+lxml
+beautifulsoup4
