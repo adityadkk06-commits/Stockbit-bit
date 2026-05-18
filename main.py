@@ -9,6 +9,7 @@ import os
 
 # IMPORT DARI SCREENER.PY
 from screener import run_screener
+from bandarmology import run_bandarmology
 
 TOKEN = os.getenv("BOT_TOKEN")
 
@@ -20,8 +21,9 @@ TOKEN = os.getenv("BOT_TOKEN")
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     keyboard = [
-        ["/screener"]
-    ]
+    ["📈 Screener"],
+    ["🏦 Bandarmology"]
+]
 
     reply_markup = ReplyKeyboardMarkup(
         keyboard,
