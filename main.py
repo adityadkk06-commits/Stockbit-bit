@@ -3,7 +3,7 @@ from telegram.ext import (
     Application,
     CommandHandler,
     MessageHandler,
-    Filters,
+    filters,
     ContextTypes
 )
 
