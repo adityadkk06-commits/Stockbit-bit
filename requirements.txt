@@ -1,8 +1,8 @@
 python-telegram-bot[job-queue]==21.6
-pandas
-numpy
-yfinance
-ta
+yfinance==0.2.51
+pandas==2.2.3
+numpy==1.26.4
+ta==0.11.0
 matplotlib
 mplfinance
 requests
