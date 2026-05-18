@@ -1,166 +1,88 @@
-# =========================================
-# screener.py
-# Stock Screener IDX Style
-# =========================================
-
-import yfinance as yf
-import pandas as pd
-import numpy as np
-
-# =========================================
-# LIST SAHAM
-# =========================================
-
-stocks = [
-    "BBCA.JK", "BMRI.JK", "BBRI.JK", "TLKM.JK",
-    "ASII.JK", "ADRO.JK", "BRPT.JK", "GOTO.JK",
-    "MEDC.JK", "MDKA.JK", "AMMN.JK", "PGEO.JK",
-    "ANTM.JK", "INCO.JK", "CPIN.JK", "ICBP.JK",
-    "ACES.JK", "AKRA.JK", "HUMI.JK", "MBMA.JK"
-]
-
-# =========================================
-# RULES
-# =========================================
-
-MIN_PRICE = 100
-MAX_PRICE = 2000
-
-MIN_MARKET_CAP = 3_000_000_000_000   # 3T
-
-MIN_VALUE_MA20 = 8_000_000_000       # 8B
-
-MIN_VOLUME_RATIO = 1.3
-
-MIN_PRICE_CHANGE = 2  # %
-
-# =========================================
-# FUNCTION
-# =========================================
+# ==========================================
+# ANALYZE STOCK
+# ==========================================
 
 def analyze_stock(symbol):
 
     try:
-        df = yf.download(symbol, period="3mo", interval="1d", progress=False)
-
-        if len(df) < 25:
-            return None
-
-        close = df["Close"]
-        volume = df["Volume"]
-
-        last_price = float(close.iloc[-1])
-
-        # ---------------------------------
-        # PRICE FILTER
-        # ---------------------------------
-
-        if last_price < MIN_PRICE:
-            return None
-
-        if last_price > MAX_PRICE:
-            return None
-
-        # ---------------------------------
-        # MARKET CAP
-        # ---------------------------------
 
         stock = yf.Ticker(symbol)
 
-        info = stock.info
+        df = stock.history(period="3mo")
 
-        market_cap = info.get("marketCap", 0)
-
-        if market_cap < MIN_MARKET_CAP:
+        if len(df) < 20:
             return None
 
-        # ---------------------------------
-        # VALUE MA20
-        # ---------------------------------
+        # ==================================
+        # BASIC DATA
+        # ==================================
 
-        value = close * volume
+        close = df["Close"]
+        open_price = df["Open"]
+        volume = df["Volume"]
 
-        value_ma20 = value.rolling(20).mean().iloc[-1]
+        last_price = close.iloc[-1]
+        prev_price = close.iloc[-2]
 
-        if value_ma20 < MIN_VALUE_MA20:
+        last_open = open_price.iloc[-1]
+
+        last_volume = volume.iloc[-1]
+        prev_volume = volume.iloc[-2]
+
+        # ==================================
+        # MOVING AVERAGE
+        # ==================================
+
+        ma5 = close.tail(5).mean()
+
+        # ==================================
+        # VALUE
+        # ==================================
+
+        value = last_price * last_volume
+
+        # ==================================
+        # FILTERS
+        # ==================================
+
+        # Price > 1 x Price MA 5
+        if last_price <= ma5:
             return None
 
-        # ---------------------------------
-        # VOLUME MA5 > 1.3 x MA20
-        # ---------------------------------
-
-        vol_ma5 = volume.rolling(5).mean().iloc[-1]
-
-        vol_ma20 = volume.rolling(20).mean().iloc[-1]
-
-        volume_ratio = vol_ma5 / vol_ma20
-
-        if volume_ratio < MIN_VOLUME_RATIO:
+        # Price > 1.05 x Previous Price
+        if last_price <= (prev_price * 1.05):
             return None
 
-        # ---------------------------------
-        # PRICE CHANGE > 2%
-        # ---------------------------------
-
-        prev_close = float(close.iloc[-2])
-
-        price_change = ((last_price - prev_close) / prev_close) * 100
-
-        if price_change < MIN_PRICE_CHANGE:
+        # Price > 1 x Open Price
+        if last_price <= last_open:
             return None
 
-        # ---------------------------------
-        # FOREIGN FLOW
-        # Tidak tersedia di Yahoo
-        # Dummy PASS sementara
-        # ---------------------------------
+        # Volume > 0.2 x Previous Volume
+        if last_volume <= (prev_volume * 0.2):
+            return None
 
-        foreign_flow = "PASS"
+        # Value > 5,000,000,000
+        if value <= 5_000_000_000:
+            return None
 
-        # =================================
+        # ==================================
         # RESULT
-        # =================================
+        # ==================================
 
-        return {
-            "Ticker": symbol.replace(".JK", ""),
-            "Price": round(last_price, 2),
-            "Change%": round(price_change, 2),
-            "MarketCap(T)": round(market_cap / 1_000_000_000_000, 2),
-            "ValueMA20(B)": round(value_ma20 / 1_000_000_000, 2),
-            "VolRatio": round(volume_ratio, 2),
-            "Foreign": foreign_flow
+        result = {
+            "symbol": symbol,
+            "price": round(last_price, 2),
+            "previous_price": round(prev_price, 2),
+            "ma5": round(ma5, 2),
+            "volume": int(last_volume),
+            "previous_volume": int(prev_volume),
+            "value": int(value)
         }
 
+        return result
+
     except Exception as e:
-        print(f"Error {symbol}: {e}")
+
+        print(f"Error {symbol} : {e}")
+
         return None
-
-
-# =========================================
-# RUN SCREENER FUNCTION
-# =========================================
-
-def run_screener():
-
-    results = []
-
-    print("\nScanning market...\n")
-
-    for stock in stocks:
-
-        result = analyze_stock(stock)
-
-        if result:
-            results.append(result)
-
-    if len(results) == 0:
-        return []
-
-    screener_df = pd.DataFrame(results)
-
-    screener_df = screener_df.sort_values(
-        by=["VolRatio", "Change%"],
-        ascending=False
-    )
-
-    return screener_df.to_dict("records")
