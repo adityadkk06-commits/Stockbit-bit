@@ -1,8 +1,1 @@
-python-telegram-bot
-pandas
-numpy
-yfinance
-ta
-requests
-mplfinance
-matplotlib
+python-telegram-bot==21.6
