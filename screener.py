@@ -86,3 +86,44 @@ def analyze_stock(symbol):
         print(f"Error {symbol} : {e}")
 
         return None
+# ==========================================
+# LOAD ALL IDX STOCKS
+# ==========================================
+
+def load_all_idx_stocks():
+
+    url = "https://www.idx.co.id/id/data-pasar/data-saham/daftar-saham"
+
+    tables = pd.read_html(url)
+
+    df = tables[0]
+
+    symbols = df["Kode"].dropna().tolist()
+
+    stocks = [f"{symbol}.JK" for symbol in symbols]
+
+    return stocks
+
+
+# ==========================================
+# RUN SCREENER
+# ==========================================
+
+def run_screener():
+
+    stocks = load_all_idx_stocks()
+
+    results = []
+
+    total = len(stocks)
+
+    for i, symbol in enumerate(stocks):
+
+        print(f"[{i+1}/{total}] Scanning {symbol}")
+
+        result = analyze_stock(symbol)
+
+        if result:
+            results.append(result)
+
+    return results
