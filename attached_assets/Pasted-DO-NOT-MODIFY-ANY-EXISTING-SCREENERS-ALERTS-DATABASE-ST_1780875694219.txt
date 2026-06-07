@@ -1,0 +1,328 @@
+DO NOT MODIFY ANY EXISTING SCREENERS, ALERTS, DATABASE STRUCTURE, API INTEGRATIONS, ARA HUNTER, AUTO ALERT SYSTEM, NOTIFICATION LOGIC, OR ANY OTHER WORKING FEATURES.
+
+ADD A NEW MENU/TAB CALLED:
+
+📊 MULTI SCREENER
+
+The Multi Screener menu must contain four selectable modes:
+
+1. AUTO SCREENING
+2. BSJP
+3. HYBRID TREND
+4. SCALPING HARIAN
+
+The user can manually choose a screener or enable AUTO SCREENING mode.
+
+━━━━━━━━━━━━━━━━━━━━
+AUTO SCREENING MODE
+━━━━━━━━━━━━━━━━━━━━
+
+Purpose:
+Automatically switch between screeners based on Indonesian stock market hours (WIB / Asia-Jakarta timezone).
+
+Schedule:
+
+09:15 – 11:00 WIB
+→ Automatically run SCALPING HARIAN
+
+Reason:
+Highest opening-session momentum, volume expansion, VWAP movement, and intraday opportunities.
+
+11:00 – 13:00 WIB
+→ Automatically run BSJP
+
+Reason:
+Morning volatility begins to stabilize, making smart-money accumulation easier to identify.
+
+13:00 – Market Close
+→ Automatically run HYBRID TREND
+
+Reason:
+Trend validation becomes more reliable through ADX, volume persistence, and continuation setups.
+
+After Market Close
+→ Run Summary Mode
+
+Display:
+- Top 5 BSJP Candidates
+- Top 5 Hybrid Candidates
+- Tomorrow Watchlist
+
+Weekend Mode (Saturday & Sunday)
+
+Display:
+"MARKET CLOSED"
+
+Show:
+- Strongest BSJP stocks from last week
+- Strongest Hybrid stocks from last week
+- Suggested watchlist for next week
+
+AUTO MODE UI:
+
+🟢 ACTIVE: SCALPING
+
+🟢 ACTIVE: BSJP
+
+🟢 ACTIVE: HYBRID
+
+The active screener badge must update automatically according to current WIB time.
+
+Requirements:
+
+- Use Asia/Jakarta timezone.
+- Switching must occur automatically without page refresh.
+- Do not alter screener logic.
+- Only switch the active screener.
+
+━━━━━━━━━━━━━━━━━━━━
+1. BSJP
+(BIG SMART MONEY / SMART ACCUMULATION)
+━━━━━━━━━━━━━━━━━━━━
+
+Purpose:
+Find stocks being accumulated by smart money with strong breakout potential over the next few days to weeks.
+
+Filters:
+
+- Market Cap > 500M
+- Price > 100
+- Price vs MA20 > 1%
+- Price vs MA50 > 1%
+- MA20 > MA50
+- Volume vs MA20 > 1.5x
+- RSI (14) between 45 and 70
+- MACD Line above Signal Line
+- 1 Week Performance > 1%
+- Price above Bollinger Lower Band
+
+Sort By:
+
+- MACD Histogram Strength (Descending)
+
+Display:
+
+- Ticker
+- Company Name
+- Current Price
+- Market Cap
+- Volume Ratio
+- RSI
+- MACD Histogram
+- Entry Area
+- Stop Loss
+- Target 1
+- Target 2
+- Confidence Score
+
+Additional Analysis:
+
+Generate:
+
+- Smart Money Score (0–100)
+- Breakout Probability
+- Accumulation Strength
+- Risk Level
+
+━━━━━━━━━━━━━━━━━━━━
+2. HYBRID TREND
+━━━━━━━━━━━━━━━━━━━━
+
+Purpose:
+Find stocks that are still under accumulation, have strengthening momentum, and are approaching a potential breakout but have not fully broken out yet.
+
+Filters:
+
+- Market Cap > 250M
+- Price > 50
+- Price vs MA20 > -2%
+- MA20 > MA50
+- Volume vs MA20 > 1.2x
+- Average Volume increasing for 3 consecutive days
+- ATR (14) > Sector Median
+- ADX (14) > 20
+- Relative Strength vs IDX > 0
+- 30-Day Price Position Range between 40% and 85%
+
+Sort By:
+
+- ADX + Volume Composite Score (Descending)
+
+Display:
+
+- Ticker
+- Company Name
+- Current Price
+- ADX
+- ATR
+- Relative Strength vs IDX
+- Volume Ratio
+- 30-Day Range Position
+- Entry Area
+- Stop Loss
+- Target 1
+- Target 2
+- Confidence Score
+
+Additional Analysis:
+
+Generate:
+
+- Trend Strength Score
+- Continuation Probability
+- Relative Strength Score
+- Risk Level
+
+━━━━━━━━━━━━━━━━━━━━
+3. SCALPING HARIAN
+━━━━━━━━━━━━━━━━━━━━
+
+Purpose:
+Find highly liquid stocks with strong intraday inflow and momentum suitable for same-day trading.
+
+Filters:
+
+- Market Cap > 1T
+- Price between 50 and 5000
+- Volume > 10M shares
+- Volume vs Previous Day > 2.0x
+- Price above VWAP by at least 1%
+- Daily Price Change > 3% and < 15%
+- Relative Volume > 1.5x
+- Intraday Range > 3%
+
+Sort By:
+
+- Volume vs Previous Day (Descending)
+
+Display:
+
+- Ticker
+- Company Name
+- Current Price
+- Volume Ratio
+- Relative Volume
+- VWAP Distance
+- Intraday Range %
+- Entry Area
+- Stop Loss
+- Scalping Target
+- Risk Reward Ratio
+- Confidence Score
+
+Additional Analysis:
+
+Generate:
+
+- Momentum Score
+- Scalping Score
+- Liquidity Score
+- Risk Level
+
+━━━━━━━━━━━━━━━━━━━━
+MULTI SCREENER UI
+━━━━━━━━━━━━━━━━━━━━
+
+Display four cards:
+
+🤖 AUTO SCREENING
+Automatic Time-Based Selection
+
+📈 BSJP
+Smart Money Accumulation
+
+📊 HYBRID TREND
+Early Trend + Accumulation
+
+⚡ SCALPING HARIAN
+Intraday Momentum
+
+Behavior:
+
+- User may choose AUTO mode.
+- User may manually choose BSJP.
+- User may manually choose HYBRID.
+- User may manually choose SCALPING.
+- Only one screener can run at a time.
+- Results must remain completely independent.
+- No shared filters.
+- No merged outputs.
+- No cross-screen contamination.
+
+━━━━━━━━━━━━━━━━━━━━
+MANUAL ENTRY CONFIRMATION
+━━━━━━━━━━━━━━━━━━━━
+
+Add an optional section below screener results:
+
+"MANUAL ENTRY VALIDATION"
+
+SCALPING CHECKLIST
+
+- Bid/Offer Ratio > 1.5
+- Price Above VWAP
+- Volume Spike Confirmed
+- No Large Sell Wall Nearby
+
+BSJP CHECKLIST
+
+- EMA9 Above EMA21
+- Volume Above Average
+- MACD Positive
+- Accumulation Pattern Intact
+
+HYBRID CHECKLIST
+
+- ADX Above 20
+- MA20 Above MA50
+- Volume Trend Positive
+- Relative Strength Positive
+
+Display:
+
+✅ PASS
+⚠️ CAUTION
+❌ FAIL
+
+for each condition.
+
+━━━━━━━━━━━━━━━━━━━━
+DEVELOPMENT REQUIREMENTS
+━━━━━━━━━━━━━━━━━━━━
+
+- Preserve all existing features.
+- Preserve all existing screeners.
+- Preserve ARA Hunter.
+- Preserve Auto Alert.
+- Preserve notification systems.
+- Preserve database structure whenever possible.
+- Preserve existing API integrations.
+- Preserve authentication and user settings.
+- Preserve deployment configuration.
+
+After implementation:
+
+1. Run full build.
+2. Fix all compile errors.
+3. Fix all lint errors.
+4. Run validation tests.
+5. Verify UI responsiveness.
+6. Commit changes.
+7. Push changes to GitHub.
+8. Deploy automatically if deployment pipeline exists.
+9. Verify production deployment.
+10. Generate implementation report.
+
+Implementation report must include:
+
+- Files modified
+- New components created
+- New routes created
+- Test results
+- Git commit hash
+- Deployment status
+- Final verification status
+
+Do not stop after generating code.
+
+Complete the entire workflow including build verification, GitHub push, deployment, and validation.
