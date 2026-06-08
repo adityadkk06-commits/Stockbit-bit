@@ -179,7 +179,44 @@ def fmt_scalping(i: int, r: dict) -> str:
     )
 
 
-def format_multi_result(title: str, emoji: str, sr: MultiScanResult, fmt_fn) -> str:
+def _fmt_debug_report(sr: MultiScanResult) -> str:
+    lines = [
+        f"\n`{'='*34}`",
+        f"`DEBUG REPORT: {sr.name}`",
+        f"`{'='*34}`",
+        f"`Total Stocks   : {sr.total_fetched}`",
+        f"`Data Retrieved : {sr.total_valid}`",
+        f"`Passed Filters : {sr.total_passed}`",
+        f"`Final Results  : {len(sr.matched)}`",
+        f"`{'─'*34}`",
+        "_Per-filter pass rates:_",
+    ]
+    for label, count in sr.filter_counts.items():
+        pct = int(count / max(sr.total_valid, 1) * 100)
+        bar = "▓" * (pct // 10) + "░" * (10 - pct // 10)
+        lines.append(f"`{label:<24}` {pct:>3}% {bar}")
+    lines.append(f"`{'='*34}`")
+    return "\n".join(lines)
+
+
+def _fmt_near_miss(sr: MultiScanResult, n_filters: int) -> str:
+    if not sr.near_miss:
+        return ""
+    lines = ["\n⚠️ *Tidak ada saham yang lolos penuh. Near Miss:*\n"]
+    for i, r in enumerate(sr.near_miss, 1):
+        pct  = r.get("pass_pct", 0)
+        passed = r.get("pass_count", 0)
+        sign = "+" if r["gain_pct"] >= 0 else ""
+        lines.append(
+            f"*{i}. {r['ticker']}* ({pct}% — {passed}/{n_filters} filter)\n"
+            f"   Price: {int(r['close'])}  Gain: {sign}{r['gain_pct']:.2f}%  "
+            f"Vol/MA20: {r['vol_vs_ma20']:.2f}x  RSI: {r['rsi']:.1f}"
+        )
+    return "\n".join(lines)
+
+
+def format_multi_result(title: str, emoji: str, sr: MultiScanResult, fmt_fn,
+                        n_filters: int = 7) -> str:
     is_open, mkt_msg = market_status()
     lines = [f"{emoji} *{title}*\n"]
 
@@ -191,14 +228,9 @@ def format_multi_result(title: str, emoji: str, sr: MultiScanResult, fmt_fn) -> 
         for i, r in enumerate(sr.matched, 1):
             lines.append(fmt_fn(i, r))
     else:
-        lines.append(
-            f"⚠️ *Scanned {sr.total_fetched} saham — tidak ada yang lolos filter.*\n"
-        )
-        top_reasons = sorted(sr.skip_reasons.items(), key=lambda x: -x[1])[:4]
-        if top_reasons:
-            lines.append("_Alasan utama gagal filter:_")
-            for reason, count in top_reasons:
-                lines.append(f"  • {reason}: {count} saham")
+        # Show near-miss candidates + debug report
+        lines.append(_fmt_near_miss(sr, n_filters))
+        lines.append(_fmt_debug_report(sr))
 
     if not is_open:
         lines.append(f"\n_{mkt_msg}_")
@@ -410,7 +442,7 @@ async def ms_bsjp_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     try:
         loop = asyncio.get_event_loop()
         sr   = await loop.run_in_executor(None, screen_bsjp_multi)
-        text = format_multi_result("BSJP — Smart Money Accumulation", "📈", sr, fmt_bsjp_multi)
+        text = format_multi_result("BSJP — Smart Money Accumulation", "📈", sr, fmt_bsjp_multi, n_filters=9)
     except Exception as e:
         logger.error(f"ms_bsjp_handler error: {e}", exc_info=True)
         text = "❌ Terjadi kesalahan saat scan BSJP. Silakan coba lagi."
@@ -425,7 +457,7 @@ async def ms_hybrid_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     try:
         loop = asyncio.get_event_loop()
         sr   = await loop.run_in_executor(None, screen_hybrid_trend)
-        text = format_multi_result("HYBRID TREND — Early Trend + Akumulasi", "📊", sr, fmt_hybrid)
+        text = format_multi_result("HYBRID TREND — Early Trend + Akumulasi", "📊", sr, fmt_hybrid, n_filters=7)
     except Exception as e:
         logger.error(f"ms_hybrid_handler error: {e}", exc_info=True)
         text = "❌ Terjadi kesalahan saat scan HYBRID TREND. Silakan coba lagi."
@@ -440,7 +472,7 @@ async def ms_scalping_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     try:
         loop = asyncio.get_event_loop()
         sr   = await loop.run_in_executor(None, screen_scalping_harian)
-        text = format_multi_result("SCALPING HARIAN — Intraday Momentum", "⚡", sr, fmt_scalping)
+        text = format_multi_result("SCALPING HARIAN — Intraday Momentum", "⚡", sr, fmt_scalping, n_filters=7)
     except Exception as e:
         logger.error(f"ms_scalping_handler error: {e}", exc_info=True)
         text = "❌ Terjadi kesalahan saat scan SCALPING. Silakan coba lagi."
