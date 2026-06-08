@@ -34,9 +34,11 @@ def _ratio(num, den, fb: float = 0.0) -> float:
 # AUTO MODE: TIME-BASED SCREENER SELECTION (WIB)
 # ─────────────────────────────────────────────────────────────────
 AUTO_SCHEDULE = [
-    (9 * 60 + 15,  11 * 60,      "SCALPING", "⚡ SCALPING HARIAN"),
-    (11 * 60,      13 * 60,      "BSJP",     "📈 BSJP"),
-    (13 * 60,      16 * 60 + 30, "HYBRID",   "📊 HYBRID TREND"),
+    (9 * 60 + 15,  11 * 60,       "SCALPING",    "⚡ SCALPING HARIAN"),
+    (11 * 60,      13 * 60,       "BSJP",         "📈 BSJP"),
+    (13 * 60,      14 * 60 + 30,  "HYBRID",       "📊 HYBRID TREND"),
+    (14 * 60 + 30, 16 * 60,       "SWING_NIGHT",  "🌙 SWING NIGHT"),
+    (16 * 60,      16 * 60 + 30,  "HYBRID",       "📊 HYBRID TREND"),
 ]
 
 
@@ -71,6 +73,7 @@ def compute_multi_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df["EMA9"]  = c.ewm(span=9,  adjust=False).mean()
     df["EMA21"] = c.ewm(span=21, adjust=False).mean()
     df["VolMA5"]  = v.rolling(5).mean()
+    df["VolMA10"] = v.rolling(10).mean()
     df["VolMA20"] = v.rolling(20).mean()
 
     # RSI (14)
@@ -100,7 +103,8 @@ def compute_multi_indicators(df: pd.DataFrame) -> pd.DataFrame:
         (h - c.shift(1)).abs(),
         (l - c.shift(1)).abs(),
     ], axis=1).max(axis=1)
-    df["ATR"] = tr.rolling(14).mean()
+    df["ATR"]   = tr.rolling(14).mean()
+    df["ATR10"] = tr.rolling(10).mean()
 
     # ADX (14)
     plus_dm  = h.diff().clip(lower=0)
@@ -144,13 +148,16 @@ def _build_multi_row(ticker: str, df: pd.DataFrame) -> dict | None:
         gain_pct = ((close - prev_c) / prev_c) * 100
         vwap     = _f(lat.get("VWAP", close))
 
+        high = _f(lat["High"])
+        low  = _f(lat["Low"])
+
         row = dict(
             ticker       = ticker,
             close        = close,
             prev         = prev_c,
             open         = _f(lat["Open"]),
-            high         = _f(lat["High"]),
-            low          = _f(lat["Low"]),
+            high         = high,
+            low          = low,
             volume       = volume,
             prev_volume  = prev_v,
             value        = close * volume,
@@ -161,6 +168,7 @@ def _build_multi_row(ticker: str, df: pd.DataFrame) -> dict | None:
             ema9         = _f(lat.get("EMA9", 0)),
             ema21        = _f(lat.get("EMA21", 0)),
             vma5         = _f(lat.get("VolMA5", 0)),
+            vma10        = _f(lat.get("VolMA10", 0)),
             vma20        = _f(lat.get("VolMA20", 0)),
             rsi          = _f(lat.get("RSI", 50)),
             macd         = _f(lat.get("MACD", 0)),
@@ -170,11 +178,13 @@ def _build_multi_row(ticker: str, df: pd.DataFrame) -> dict | None:
             bb_lower     = _f(lat.get("BB_Lower", 0)),
             bb_mid       = _f(lat.get("BB_Mid", 0)),
             atr          = _f(lat.get("ATR", 0)),
+            atr10        = _f(lat.get("ATR10", 0)),
             adx          = _f(lat.get("ADX", 0)),
             intraday_rng = _f(lat.get("IntradayRange", 0)),
             vwap         = vwap,
             price_pos30  = _f(lat.get("PricePos30", 50)),
             ret5d        = _f(lat.get("Ret5d", 0)),
+            market_cap   = _f(lat.get("MarketCap", 0)),
             tp           = round(close * (1 + TP_PERCENT)),
             sl           = round(close * (1 - SL_PERCENT)),
         )
@@ -182,6 +192,9 @@ def _build_multi_row(ticker: str, df: pd.DataFrame) -> dict | None:
         row["vol_vs_ma20"]   = _ratio(volume, row["vma20"])
         row["vol_vs_prev"]   = _ratio(volume, prev_v)
         row["vwap_dist_pct"] = ((close - vwap) / vwap * 100) if vwap > 0 else 0
+        row["rel_vol_10"]    = _ratio(volume, row["vma10"])
+        row["range_atr10"]   = _ratio(high - low, row["atr10"]) if row["atr10"] > 0 else 0
+        row["price_vs_low"]  = ((close - low) / low * 100) if low > 0 else 0
 
         try:
             vols = df["Volume"].iloc[-4:-1].values
@@ -300,6 +313,64 @@ def _scalping_score(row: dict) -> int:
 
 
 # ─────────────────────────────────────────────────────────────────
+# SCREENER D: SWING NIGHT GW (Afternoon Session — 14:30–16:00 WIB)
+# ─────────────────────────────────────────────────────────────────
+SWING_NIGHT_GW_FILTERS = [
+    ("MarketCap > 1T",         lambda r, _: r["market_cap"] > 1_000_000_000_000),
+    ("Price 50–5000",          lambda r, _: 50 <= r["close"] <= 5000),
+    ("Volume > 5M",            lambda r, _: r["volume"] >= 5_000_000),
+    ("Range/ATR10 < 90%",      lambda r, _: 0 < r["range_atr10"] < 0.9),
+    ("Gain +1% to +8%",        lambda r, _: 1.0 <= r["gain_pct"] <= 8.0),
+    ("Price vs Low > 1%",      lambda r, _: r["price_vs_low"] >= 1.0),
+    ("Vol/Prev >= 1.0x",       lambda r, _: r["vol_vs_prev"] >= 1.0),
+    ("VWAP Dist -2% to +2%",   lambda r, _: -2.0 <= r["vwap_dist_pct"] <= 2.0),
+    ("RelVol10 > 1.2x",        lambda r, _: r["rel_vol_10"] >= 1.2),
+    ("ADX > 20",               lambda r, _: r["adx"] >= 20),
+]
+
+
+def screen_swing_night_gw() -> MultiScanResult:
+    return _run_multi("SWING NIGHT GW", SWING_NIGHT_GW_FILTERS, _swing_night_score)
+
+
+def _swing_night_score(row: dict) -> int:
+    score = 0
+    # ADX trend strength (30 pts)
+    if row["adx"] > 20:
+        score += min(30, int((row["adx"] - 20) * 2))
+    # Relative volume (25 pts)
+    score += min(25, int((row["rel_vol_10"] - 1.0) * 20))
+    # Afternoon volume ratio vs prev day (20 pts)
+    score += min(20, int((row["vol_vs_prev"] - 1.0) * 15))
+    # VWAP proximity — closer = higher score (15 pts)
+    vwap_abs = abs(row["vwap_dist_pct"])
+    score += max(0, 15 - int(vwap_abs * 7))
+    # Gain momentum (10 pts)
+    score += min(10, int(max(0, row["gain_pct"] - 1.0) * 3))
+    return max(0, min(100, score))
+
+
+def swing_night_reasons(r: dict) -> list[str]:
+    """Dynamically generate conviction reasons for a SWING NIGHT candidate."""
+    reasons = []
+    if r["vol_vs_prev"] >= 1.5:
+        reasons.append("✅ Strong afternoon accumulation")
+    elif r["vol_vs_prev"] >= 1.0:
+        reasons.append("✅ Increasing Session 2 volume")
+    if r["rel_vol_10"] >= 1.5:
+        reasons.append("✅ Above-average relative volume")
+    if r["adx"] >= 25:
+        reasons.append("✅ Healthy trend strength")
+    if abs(r["vwap_dist_pct"]) <= 1.0:
+        reasons.append("✅ Trading near VWAP")
+    if r["gain_pct"] >= 2.0:
+        reasons.append("✅ Potential next-day continuation")
+    if not reasons:
+        reasons.append("✅ Passes all Swing Night criteria")
+    return reasons
+
+
+# ─────────────────────────────────────────────────────────────────
 # GENERIC MULTI RUNNER — with full debug counters + near-miss
 # ─────────────────────────────────────────────────────────────────
 NEAR_MISS_TOP = 10
@@ -399,6 +470,8 @@ def run_auto_screener() -> tuple[str, str, MultiScanResult | None]:
         return mode_key, status_msg, screen_bsjp_multi()
     elif mode_key == "HYBRID":
         return mode_key, status_msg, screen_hybrid_trend()
+    elif mode_key == "SWING_NIGHT":
+        return mode_key, status_msg, screen_swing_night_gw()
     else:
         return mode_key, status_msg, None
 
