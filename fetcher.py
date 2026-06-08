@@ -50,6 +50,7 @@ def _parse_chart(symbol: str, data: dict) -> pd.DataFrame | None:
 
         chart   = result[0]
         meta    = chart.get("meta", {})
+        market_cap = float(meta.get("regularMarketCap", 0) or 0)
         timestamps = chart.get("timestamp", [])
         quote   = chart.get("indicators", {}).get("quote", [{}])[0]
         adjclose_list = (
@@ -83,6 +84,7 @@ def _parse_chart(symbol: str, data: dict) -> pd.DataFrame | None:
         df = df[~df.index.duplicated(keep="last")]     # Remove duplicate dates
         df = df.dropna(subset=["Close", "Volume"])     # Drop rows with missing core data
         df = df.sort_index()
+        df["MarketCap"] = market_cap                   # IDR from Yahoo meta
 
         return df
     except Exception as e:
