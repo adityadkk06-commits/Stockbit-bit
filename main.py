@@ -1,3 +1,4 @@
+import os
 import logging
 import asyncio
 from datetime import datetime, timezone, timedelta
@@ -36,7 +37,10 @@ for noisy in ("httpx", "httpcore", "telegram", "yfinance",
 logger = logging.getLogger(__name__)
 WIB = timezone(timedelta(hours=7))
 
-MAX_MSG = 4000   # Telegram message character limit (safe margin)
+MAX_MSG = 4000   # Telegram safe character limit per message
+
+# Detect Railway environment — Railway sets RAILWAY_ENVIRONMENT automatically
+ON_RAILWAY = bool(os.environ.get("RAILWAY_ENVIRONMENT"))
 
 
 # ─────────────────────────────────────────
@@ -46,7 +50,7 @@ def market_status() -> tuple[bool, str]:
     now = datetime.now(WIB)
     wd  = now.weekday()
     t   = now.hour * 60 + now.minute
-    days = ['Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab', 'Min']
+    days = ["Sen", "Sel", "Rab", "Kam", "Jum", "Sab", "Min"]
 
     if wd >= 5:
         return False, f"⚠️ Pasar tutup (hari {days[wd]}). Data = penutupan terakhir."
@@ -68,10 +72,9 @@ def fmt_num(v: float) -> str:
 
 
 # ─────────────────────────────────────────
-# SEND HELPER — splits long messages
+# SEND HELPER — splits messages > 4000 chars
 # ─────────────────────────────────────────
 async def send_or_edit(msg, text: str, **kwargs):
-    """Edit message, splitting into multiple if too long."""
     chunks = []
     while len(text) > MAX_MSG:
         split_at = text.rfind("\n", 0, MAX_MSG)
@@ -86,11 +89,13 @@ async def send_or_edit(msg, text: str, **kwargs):
         for chunk in chunks[1:]:
             await msg.reply_text(chunk, **kwargs)
     except Exception as e:
-        logger.warning(f"send_or_edit error: {e}")
+        logger.warning(f"edit_text failed ({e}), sending as reply")
         try:
             await msg.reply_text(chunks[0], **kwargs)
-        except Exception:
-            pass
+            for chunk in chunks[1:]:
+                await msg.reply_text(chunk, **kwargs)
+        except Exception as e2:
+            logger.error(f"send_or_edit completely failed: {e2}")
 
 
 # ─────────────────────────────────────────
@@ -118,11 +123,11 @@ def format_scan_result(title: str, emoji: str, sr: ScanResult) -> str:
         lines.append(f"⚠️ Scanned {sr.total_fetched} saham — 0 lolos filter\n")
         top = sorted(sr.skip_reasons.items(), key=lambda x: -x[1])[:4]
         if top:
-            lines.append("Filter paling ketat:")
+            lines.append("_Filter paling ketat:_")
             for reason, count in top:
                 lines.append(f"  • {reason}: {count} saham")
         if sr.near_miss:
-            lines.append("\nKandidat terdekat:")
+            lines.append("\n_Kandidat terdekat:_")
             for r in sr.near_miss:
                 sign = "+" if r["gain_pct"] >= 0 else ""
                 lines.append(
@@ -145,7 +150,8 @@ def fmt_bsjp_multi(i: int, r: dict) -> str:
     return (
         f"*{i}. {r['ticker']}*\n"
         f"Price: {int(r['close'])}  ({sign}{r['gain_pct']:.2f}%)\n"
-        f"Vol/MA20: {r['vol_vs_ma20']:.2f}x  RSI: {r['rsi']:.1f}  MACD: {r['macd_hist']:+.4f}\n"
+        f"Vol/MA20: {r['vol_vs_ma20']:.2f}x  RSI: {r['rsi']:.1f}  "
+        f"MACD: {r['macd_hist']:+.4f}\n"
         f"TP1: {r['tp']}  SL: {r['sl']}  Conf: {conf}%\n"
     )
 
@@ -156,8 +162,10 @@ def fmt_hybrid(i: int, r: dict) -> str:
     return (
         f"*{i}. {r['ticker']}*\n"
         f"Price: {int(r['close'])}  ({sign}{r['gain_pct']:.2f}%)\n"
-        f"ADX: {r['adx']:.1f}  ATR: {r['atr']:.0f}  Vol/MA20: {r['vol_vs_ma20']:.2f}x\n"
-        f"30d Pos: {r['price_pos30']:.0f}%  1W: {r['ret5d']:+.1f}%  Conf: {conf}%\n"
+        f"ADX: {r['adx']:.1f}  ATR: {r['atr']:.0f}  "
+        f"Vol/MA20: {r['vol_vs_ma20']:.2f}x\n"
+        f"30d Pos: {r['price_pos30']:.0f}%  1W: {r['ret5d']:+.1f}%  "
+        f"Conf: {conf}%\n"
         f"TP: {r['tp']}  SL: {r['sl']}\n"
     )
 
@@ -169,41 +177,44 @@ def fmt_scalping(i: int, r: dict) -> str:
     return (
         f"*{i}. {r['ticker']}*\n"
         f"Price: {int(r['close'])}  ({sign}{r['gain_pct']:.2f}%)\n"
-        f"Vol/Prev: {r['vol_vs_prev']:.2f}x  VWAP+: {r['vwap_dist_pct']:.1f}%\n"
-        f"Range: {r['intraday_rng']:.1f}%  Target: {target}  SL: {r['sl']}  Conf: {conf}%\n"
+        f"Vol/Prev: {r['vol_vs_prev']:.2f}x  VWAP: {r['vwap_dist_pct']:.1f}%\n"
+        f"Range: {r['intraday_rng']:.1f}%  Target: {target}  "
+        f"SL: {r['sl']}  Conf: {conf}%\n"
     )
 
 
 def _build_near_miss_text(sr: MultiScanResult, filter_list: list) -> str:
     n = len(filter_list)
     if not sr.near_miss:
-        return "Tidak ada kandidat mendekati filter."
+        return "⚠️ Tidak ada kandidat mendekati filter."
 
-    lines = [f"⚠️ *0 saham lolos — Near Miss (Top {len(sr.near_miss)}):*\n"]
+    lines = [f"⚠️ *0 saham lolos — Near Miss Top {len(sr.near_miss)}:*\n"]
     for i, r in enumerate(sr.near_miss, 1):
         passed = r.get("pass_count", 0)
-        pct    = r.get("pass_pct", 0)
+        pct    = r.get("pass_pct",   0)
         sign   = "+" if r["gain_pct"] >= 0 else ""
+        vol    = r.get("vol_vs_ma20", 0.0)
+        rsi    = r.get("rsi", 0.0)
         lines.append(
-            f"*{i}. {r['ticker']}* — {pct}% ({passed}/{n} filter)\n"
+            f"*{i}. {r['ticker']}* — {pct:.0f}% ({passed}/{n} filter)\n"
             f"   {int(r['close'])} IDR  {sign}{r['gain_pct']:.2f}%  "
-            f"Vol/MA20:{r['vol_vs_ma20']:.2f}x  RSI:{r['rsi']:.1f}"
+            f"Vol/MA20: {vol:.2f}x  RSI: {rsi:.1f}"
         )
     return "\n".join(lines)
 
 
 def _build_debug_text(sr: MultiScanResult) -> str:
+    if not sr.filter_counts:
+        return ""
     lines = [
-        "\n📊 *Debug Report*",
-        f"Total: {sr.total_fetched}  Valid: {sr.total_valid}  Lolos: {sr.total_passed}",
-        "\nPass rate per filter:"
+        "\n📊 *Debug — Pass Rate per Filter:*",
+        f"Total: {sr.total_fetched}  Valid: {sr.total_valid}  Lolos: {sr.total_passed}\n"
     ]
     for label, count in sr.filter_counts.items():
         pct = int(count / max(sr.total_valid, 1) * 100)
         bar = "█" * (pct // 10) + "░" * (10 - pct // 10)
-        # Escape any special Markdown chars in label
-        safe_label = label.replace("*", "").replace("_", "").replace("`", "")
-        lines.append(f"{safe_label}: {pct}% {bar} ({count}/{sr.total_valid})")
+        safe = label.replace("*", "").replace("_", "").replace("`", "")
+        lines.append(f"{safe}: {pct}% {bar}")
     return "\n".join(lines)
 
 
@@ -218,7 +229,9 @@ def format_multi_result(title: str, emoji: str, sr: MultiScanResult,
             lines.append(fmt_fn(i, r))
     else:
         lines.append(_build_near_miss_text(sr, filter_list))
-        lines.append(_build_debug_text(sr))
+        debug = _build_debug_text(sr)
+        if debug:
+            lines.append(debug)
 
     if not is_open:
         lines.append(f"\n_{mkt_msg}_")
@@ -231,19 +244,19 @@ def format_auto_result(mode_key: str, status_msg: str,
     lines = [f"🤖 *AUTO SCREENING*\n_{status_msg}_\n"]
 
     if mode_key == "WEEKEND":
-        lines.append("📴 *MARKET CLOSED — Weekend Mode*")
-        lines.append("\nGunakan screener manual untuk melihat data terakhir.")
+        lines.append("📴 *Market Closed — Weekend*")
+        lines.append("_Gunakan screener manual untuk lihat data terakhir._")
         return "\n".join(lines)
 
     if mode_key == "SUMMARY" or sr is None:
-        lines.append("📋 *Pasar di luar jam perdagangan.*")
+        lines.append("📋 _Pasar di luar jam perdagangan._")
         lines.append("Gunakan BSJP / HYBRID TREND untuk lihat kandidat terkuat.")
         return "\n".join(lines)
 
     fmt_map = {
-        "SCALPING": (fmt_scalping, "⚡ SCALPING HARIAN", SCALPING_FILTERS),
-        "BSJP":     (fmt_bsjp_multi, "📈 BSJP",          BSJP_FILTERS_MULTI),
-        "HYBRID":   (fmt_hybrid, "📊 HYBRID TREND",       HYBRID_FILTERS),
+        "SCALPING": (fmt_scalping,    "⚡ SCALPING HARIAN",        SCALPING_FILTERS),
+        "BSJP":     (fmt_bsjp_multi,  "📈 BSJP Smart Money",       BSJP_FILTERS_MULTI),
+        "HYBRID":   (fmt_hybrid,      "📊 HYBRID TREND",           HYBRID_FILTERS),
     }
     fmt_fn, label, fl = fmt_map.get(mode_key, (fmt_scalping, "SCREENER", SCALPING_FILTERS))
 
@@ -253,7 +266,9 @@ def format_auto_result(mode_key: str, status_msg: str,
             lines.append(fmt_fn(i, r))
     else:
         lines.append(_build_near_miss_text(sr, fl))
-        lines.append(_build_debug_text(sr))
+        debug = _build_debug_text(sr)
+        if debug:
+            lines.append(debug)
 
     return "\n".join(lines)
 
@@ -291,16 +306,14 @@ def get_multi_keyboard() -> ReplyKeyboardMarkup:
 async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     is_open, mkt_msg = market_status()
     _, _, auto_status = get_auto_mode()
+    env_label = "Railway ☁️" if ON_RAILWAY else "Replit 🔧"
     await update.message.reply_text(
-        f"👋 *From Zero To Billiuner — Stock Screener*\n\n"
-        f"Status Pasar: {mkt_msg}\n"
-        f"Auto Screener: {auto_status}\n"
-        f"Universe: *{len(STOCK_UNIVERSE)} saham* IDX\n\n"
-        "Pilih screener:\n"
-        "🔥 *BIG ACCUMULATION* — Saham murah + akumulasi kuat\n"
-        "📈 *BSJP* — Momentum bullish + likuiditas tinggi\n"
-        "🚀 *ARA HUNTER* — Potensi Auto Reject Atas\n"
-        "📊 *MULTI SCREENER* — Auto/BSJP/Hybrid/Scalping\n",
+        f"👋 *From Zero To Billiuner — IDX Screener*\n\n"
+        f"Status: {mkt_msg}\n"
+        f"Auto Mode: {auto_status}\n"
+        f"Universe: *{len(STOCK_UNIVERSE)} saham* IDX\n"
+        f"Env: {env_label}\n\n"
+        "Pilih screener dari tombol di bawah 👇",
         parse_mode="Markdown",
         reply_markup=get_keyboard(),
     )
@@ -308,16 +321,19 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
-        "📖 *Panduan Screener*\n\n"
-        "🔥 *BIG ACCUMULATION* — Saham < 500 IDR, A/D kuat, vol surge\n"
-        "📈 *BSJP* — Vol > 2x MA20, gain > 1%, MA20 > MA50, foreign accum\n"
+        "📖 *Panduan Screener IDX*\n\n"
+        "🔥 *BIG ACCUMULATION* — Saham < 500, A/D kuat, vol surge\n"
+        "📈 *BSJP* — Vol > 2x MA20, gain > 1%, MA20 > MA50\n"
         "🚀 *ARA HUNTER* — Gain > 5%, close > open, above MA5\n\n"
         "📊 *MULTI SCREENER*\n"
-        "• AUTO: otomatis sesuai jam WIB\n"
-        "• MS:BSJP: RSI 45-70, MACD, Vol > 1.5x MA20\n"
-        "• MS:HYBRID: ADX > 20, vol inc 3 hari, MA20 > MA50\n"
-        "• MS:SCALPING: Vol > 10M, gain 3-15%, VWAP +1%\n\n"
-        "Jika 0 saham lolos → tampil Near Miss + Debug Report\n"
+        "• 🤖 AUTO — Otomatis sesuai jam WIB\n"
+        "  09:15–11:00 = ⚡ Scalping\n"
+        "  11:00–13:00 = 📈 BSJP\n"
+        "  13:00–16:30 = 📊 Hybrid\n"
+        "• MS:BSJP — RSI 45-70, MACD, Vol > 1.5x MA20\n"
+        "• MS:HYBRID — ADX > 20, vol inc 3hr, MA20 > MA50\n"
+        "• MS:SCALPING — Vol > 10M, gain 3-15%, VWAP +1%\n\n"
+        "_Jika 0 saham lolos → tampil Near Miss + Debug_\n"
         "TP = +5%  |  SL = -3%",
         parse_mode="Markdown",
         reply_markup=get_keyboard(),
@@ -333,7 +349,7 @@ async def _run_async(fn):
 
 
 # ─────────────────────────────────────────
-# ORIGINAL SCREENER HANDLERS (unchanged logic)
+# ORIGINAL SCREENER HANDLERS
 # ─────────────────────────────────────────
 async def big_accumulation_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     msg = await update.message.reply_text(
@@ -385,14 +401,13 @@ async def multi_screener_menu_handler(update: Update, context: ContextTypes.DEFA
     await update.message.reply_text(
         f"📊 *MULTI SCREENER*\n\n"
         f"Auto Status: _{auto_status}_\n\n"
-        "🤖 *AUTO SCREENING* — Otomatis sesuai jam WIB\n"
+        "🤖 *AUTO* — Pilih screener otomatis sesuai jam WIB\n"
         "  09:15–11:00 → ⚡ Scalping Harian\n"
-        "  11:00–13:00 → 📈 BSJP\n"
+        "  11:00–13:00 → 📈 BSJP Smart Money\n"
         "  13:00–16:30 → 📊 Hybrid Trend\n\n"
         "📈 *MS:BSJP* — Smart Money Accumulation\n"
         "📊 *MS:HYBRID TREND* — Early Trend + Akumulasi\n"
-        "⚡ *MS:SCALPING HARIAN* — Intraday Momentum\n\n"
-        "_Pilih tombol di bawah:_",
+        "⚡ *MS:SCALPING HARIAN* — Intraday Momentum\n",
         parse_mode="Markdown",
         reply_markup=get_multi_keyboard(),
     )
@@ -416,7 +431,7 @@ async def auto_screening_handler(update: Update, context: ContextTypes.DEFAULT_T
 
 async def ms_bsjp_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     msg = await update.message.reply_text(
-        f"⏳ Scanning *{len(STOCK_UNIVERSE)} saham* untuk BSJP (Smart Money) …",
+        f"⏳ Scanning *{len(STOCK_UNIVERSE)} saham* untuk BSJP Smart Money …",
         parse_mode="Markdown",
     )
     try:
@@ -485,13 +500,14 @@ async def unknown_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 
 # ─────────────────────────────────────────
-# ERROR HANDLER — graceful conflict + network handling
+# ERROR HANDLER
 # ─────────────────────────────────────────
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     err = context.error
     if isinstance(err, Conflict):
-        logger.warning("Conflict: another bot instance active. Retrying…")
-        return   # PTB retries automatically; suppress traceback spam
+        logger.warning("Conflict: another bot instance is active. Retrying after delay…")
+        await asyncio.sleep(5)
+        return
     if isinstance(err, (NetworkError, TimedOut)):
         logger.warning(f"Network issue (will retry): {err}")
         return
@@ -499,29 +515,27 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 # ─────────────────────────────────────────
-# ENTRY POINT
+# BUILD APP
 # ─────────────────────────────────────────
-def main() -> None:
+def build_app() -> Application:
     if not TELEGRAM_BOT_TOKEN:
         raise ValueError("TELEGRAM_BOT_TOKEN is not set.")
 
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
-
-    # Error handler (stops Conflict spam in logs)
     app.add_error_handler(error_handler)
 
     # Original screeners
-    app.add_handler(MessageHandler(filters.Regex(r"BIG ACCUMULATION"), big_accumulation_handler))
-    app.add_handler(MessageHandler(filters.Regex(r"^📈 BSJP$"),         bsjp_handler))
-    app.add_handler(MessageHandler(filters.Regex(r"ARA HUNTER"),        ara_hunter_handler))
+    app.add_handler(MessageHandler(filters.Regex(r"BIG ACCUMULATION"),  big_accumulation_handler))
+    app.add_handler(MessageHandler(filters.Regex(r"^📈 BSJP$"),          bsjp_handler))
+    app.add_handler(MessageHandler(filters.Regex(r"ARA HUNTER"),         ara_hunter_handler))
 
-    # Multi Screener — sub-options FIRST (more specific), then menu trigger
-    app.add_handler(MessageHandler(filters.Regex(r"MS:BSJP"),           ms_bsjp_handler))
-    app.add_handler(MessageHandler(filters.Regex(r"MS:HYBRID TREND"),   ms_hybrid_handler))
-    app.add_handler(MessageHandler(filters.Regex(r"MS:SCALPING"),       ms_scalping_handler))
-    app.add_handler(MessageHandler(filters.Regex(r"AUTO SCREENING"),    auto_screening_handler))
-    app.add_handler(MessageHandler(filters.Regex(r"KEMBALI"),           ms_back_handler))
-    app.add_handler(MessageHandler(filters.Regex(r"MULTI SCREENER"),    multi_screener_menu_handler))
+    # Multi screener sub-options (specific first)
+    app.add_handler(MessageHandler(filters.Regex(r"MS:BSJP"),            ms_bsjp_handler))
+    app.add_handler(MessageHandler(filters.Regex(r"MS:HYBRID TREND"),    ms_hybrid_handler))
+    app.add_handler(MessageHandler(filters.Regex(r"MS:SCALPING"),        ms_scalping_handler))
+    app.add_handler(MessageHandler(filters.Regex(r"AUTO SCREENING"),     auto_screening_handler))
+    app.add_handler(MessageHandler(filters.Regex(r"KEMBALI"),            ms_back_handler))
+    app.add_handler(MessageHandler(filters.Regex(r"MULTI SCREENER"),     multi_screener_menu_handler))
 
     # Commands
     app.add_handler(CommandHandler("start", start_handler))
@@ -530,11 +544,34 @@ def main() -> None:
     # Fallback
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, unknown_handler))
 
-    logger.info(f"Bot started — universe: {len(STOCK_UNIVERSE)} stocks")
-    app.run_polling(
-        allowed_updates=Update.ALL_TYPES,
-        drop_pending_updates=True,
-    )
+    return app
+
+
+# ─────────────────────────────────────────
+# ENTRY POINT — webhook on Railway, polling elsewhere
+# ─────────────────────────────────────────
+def main() -> None:
+    app = build_app()
+
+    # Railway: use webhook mode to avoid Telegram polling conflicts
+    webhook_url = os.environ.get("WEBHOOK_URL", "")
+    port        = int(os.environ.get("PORT", 8080))
+
+    if ON_RAILWAY and webhook_url:
+        logger.info(f"Starting in WEBHOOK mode — {webhook_url}")
+        app.run_webhook(
+            listen="0.0.0.0",
+            port=port,
+            url_path="/webhook",
+            webhook_url=f"{webhook_url.rstrip('/')}/webhook",
+        )
+    else:
+        env = "Railway (no WEBHOOK_URL set)" if ON_RAILWAY else "Replit/local"
+        logger.info(f"Bot started in POLLING mode [{env}] — universe: {len(STOCK_UNIVERSE)} stocks")
+        app.run_polling(
+            allowed_updates=Update.ALL_TYPES,
+            drop_pending_updates=True,
+        )
 
 
 if __name__ == "__main__":
