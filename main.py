@@ -17,9 +17,10 @@ from screener import (
 )
 from multi_screener import (
     screen_bsjp_multi, screen_hybrid_trend, screen_scalping_harian,
+    screen_swing_night_gw, swing_night_reasons,
     run_auto_screener, get_auto_mode,
     MultiScanResult,
-    BSJP_FILTERS_MULTI, HYBRID_FILTERS, SCALPING_FILTERS,
+    BSJP_FILTERS_MULTI, HYBRID_FILTERS, SCALPING_FILTERS, SWING_NIGHT_GW_FILTERS,
 )
 
 # ─────────────────────────────────────────
@@ -239,6 +240,80 @@ def format_multi_result(title: str, emoji: str, sr: MultiScanResult,
     return "\n".join(lines)
 
 
+def _fmt_swing_night_card(i: int, r: dict) -> str:
+    conviction = "HIGH" if r["score"] >= 70 else "MEDIUM" if r["score"] >= 50 else "LOW"
+    sign       = "+" if r["gain_pct"] >= 0 else ""
+    entry_lo   = int(r["close"])
+    entry_hi   = round(r["close"] * 1.01)
+    sl_price   = max(round(r["low"] * 0.985), round(r["close"] * 0.97))
+    t1         = round(r["close"] * 1.03)
+    t2         = round(r["close"] * 1.06)
+    reasons    = swing_night_reasons(r)
+
+    lines = [
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+        f"🌙 *SWING NIGHT #{i} — {r['ticker']}*",
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+        "",
+        f"*Ticker:* {r['ticker']}",
+        f"*Price:* {int(r['close'])} IDR",
+        f"*Change:* {sign}{r['gain_pct']:.2f}%",
+        f"*Relative Volume:* {r['rel_vol_10']:.2f}x",
+        f"*Afternoon Vol Ratio:* {r['vol_vs_prev']:.2f}x",
+        f"*ADX:* {r['adx']:.1f}",
+        f"*VWAP Distance:* {r['vwap_dist_pct']:+.2f}%",
+        "",
+        f"*Score:* {r['score']}/100",
+        f"*Conviction:* {conviction}",
+        "",
+        f"*Entry Zone:* {entry_lo} — {entry_hi}",
+        f"*Stop Loss:* {sl_price}",
+        f"*Target 1:* {t1}",
+        f"*Target 2:* {t2}",
+        "",
+        "*Reasons:*",
+    ] + reasons
+
+    return "\n".join(lines)
+
+
+def format_swing_night_result(sr: MultiScanResult) -> str:
+    is_open, mkt_msg = market_status()
+    now = datetime.now(WIB)
+    t   = now.hour * 60 + now.minute
+
+    header = "🌙 *SWING NIGHT GW — Afternoon Session Screener*\n"
+
+    if not (14 * 60 + 30 <= t < 16 * 60):
+        time_note = (
+            f"\n⚠️ _Screener ini optimal saat 14:30–16:00 WIB. "
+            f"Sekarang: {now.strftime('%H:%M')} WIB — data tetap ditampilkan._\n"
+        )
+    else:
+        time_note = ""
+
+    if sr.matched:
+        parts = [
+            header,
+            f"✅ *{len(sr.matched)} kandidat* dari {sr.total_fetched} saham",
+            f"_Sorted by highest Score_\n",
+        ]
+        for i, r in enumerate(sr.matched, 1):
+            parts.append(_fmt_swing_night_card(i, r))
+    else:
+        parts = [header, _build_near_miss_text(sr, SWING_NIGHT_GW_FILTERS)]
+        debug = _build_debug_text(sr)
+        if debug:
+            parts.append(debug)
+
+    if time_note:
+        parts.append(time_note)
+    if not is_open:
+        parts.append(f"\n_{mkt_msg}_")
+
+    return "\n".join(parts)
+
+
 def format_auto_result(mode_key: str, status_msg: str,
                        sr: MultiScanResult | None) -> str:
     lines = [f"🤖 *AUTO SCREENING*\n_{status_msg}_\n"]
@@ -253,10 +328,13 @@ def format_auto_result(mode_key: str, status_msg: str,
         lines.append("Gunakan BSJP / HYBRID TREND untuk lihat kandidat terkuat.")
         return "\n".join(lines)
 
+    if mode_key == "SWING_NIGHT":
+        return f"🤖 *AUTO SCREENING*\n_{status_msg}_\n\n" + format_swing_night_result(sr)
+
     fmt_map = {
-        "SCALPING": (fmt_scalping,    "⚡ SCALPING HARIAN",        SCALPING_FILTERS),
-        "BSJP":     (fmt_bsjp_multi,  "📈 BSJP Smart Money",       BSJP_FILTERS_MULTI),
-        "HYBRID":   (fmt_hybrid,      "📊 HYBRID TREND",           HYBRID_FILTERS),
+        "SCALPING": (fmt_scalping,    "⚡ SCALPING HARIAN",  SCALPING_FILTERS),
+        "BSJP":     (fmt_bsjp_multi,  "📈 BSJP Smart Money", BSJP_FILTERS_MULTI),
+        "HYBRID":   (fmt_hybrid,      "📊 HYBRID TREND",     HYBRID_FILTERS),
     }
     fmt_fn, label, fl = fmt_map.get(mode_key, (fmt_scalping, "SCREENER", SCALPING_FILTERS))
 
@@ -293,6 +371,7 @@ def get_multi_keyboard() -> ReplyKeyboardMarkup:
             [KeyboardButton("🤖 AUTO SCREENING")],
             [KeyboardButton("📈 MS:BSJP"), KeyboardButton("📊 MS:HYBRID TREND")],
             [KeyboardButton("⚡ MS:SCALPING HARIAN")],
+            [KeyboardButton("🌙 MS:SWING NIGHT")],
             [KeyboardButton("⬅️ KEMBALI")],
         ],
         resize_keyboard=True,
@@ -407,7 +486,8 @@ async def multi_screener_menu_handler(update: Update, context: ContextTypes.DEFA
         "  13:00–16:30 → 📊 Hybrid Trend\n\n"
         "📈 *MS:BSJP* — Smart Money Accumulation\n"
         "📊 *MS:HYBRID TREND* — Early Trend + Akumulasi\n"
-        "⚡ *MS:SCALPING HARIAN* — Intraday Momentum\n",
+        "⚡ *MS:SCALPING HARIAN* — Intraday Momentum\n"
+        "🌙 *MS:SWING NIGHT* — Afternoon Session (14:30–16:00)\n",
         parse_mode="Markdown",
         reply_markup=get_multi_keyboard(),
     )
@@ -483,6 +563,21 @@ async def ms_scalping_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     await send_or_edit(msg, text, parse_mode="Markdown", reply_markup=get_multi_keyboard())
 
 
+async def ms_swing_night_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    msg = await update.message.reply_text(
+        f"⏳ Scanning *{len(STOCK_UNIVERSE)} saham* untuk SWING NIGHT GW …",
+        parse_mode="Markdown",
+    )
+    try:
+        loop = asyncio.get_event_loop()
+        sr   = await loop.run_in_executor(None, screen_swing_night_gw)
+        text = format_swing_night_result(sr)
+    except Exception as e:
+        logger.error(f"ms_swing_night_handler: {e}", exc_info=True)
+        text = "❌ Error saat scan SWING NIGHT. Coba lagi."
+    await send_or_edit(msg, text, parse_mode="Markdown", reply_markup=get_multi_keyboard())
+
+
 async def ms_back_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     is_open, mkt_msg = market_status()
     await update.message.reply_text(
@@ -533,6 +628,7 @@ def build_app() -> Application:
     app.add_handler(MessageHandler(filters.Regex(r"MS:BSJP"),            ms_bsjp_handler))
     app.add_handler(MessageHandler(filters.Regex(r"MS:HYBRID TREND"),    ms_hybrid_handler))
     app.add_handler(MessageHandler(filters.Regex(r"MS:SCALPING"),        ms_scalping_handler))
+    app.add_handler(MessageHandler(filters.Regex(r"MS:SWING NIGHT"),     ms_swing_night_handler))
     app.add_handler(MessageHandler(filters.Regex(r"AUTO SCREENING"),     auto_screening_handler))
     app.add_handler(MessageHandler(filters.Regex(r"KEMBALI"),            ms_back_handler))
     app.add_handler(MessageHandler(filters.Regex(r"MULTI SCREENER"),     multi_screener_menu_handler))
