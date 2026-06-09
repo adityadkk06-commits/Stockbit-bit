@@ -15,6 +15,9 @@ from config import TELEGRAM_BOT_TOKEN, STOCK_UNIVERSE
 from screener import (
     screen_big_accumulation, screen_bsjp, screen_ara_hunter, ScanResult
 )
+from top_gainer import (
+    screen_top_gainer_hunter, TOP_GAINER_FILTERS, TopGainerResult,
+)
 from multi_screener import (
     screen_bsjp_multi, screen_hybrid_trend, screen_scalping_harian,
     screen_swing_night_gw, swing_night_reasons,
@@ -358,7 +361,8 @@ def get_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         [
             [KeyboardButton("🔥 BIG ACCUMULATION"), KeyboardButton("📈 BSJP")],
-            [KeyboardButton("🚀 ARA HUNTER"),       KeyboardButton("📊 MULTI SCREENER")],
+            [KeyboardButton("🚀 ARA HUNTER"),        KeyboardButton("📊 MULTI SCREENER")],
+            [KeyboardButton("🏆 TOP GAINER HUNTER")],
         ],
         resize_keyboard=True,
         one_time_keyboard=False,
@@ -430,6 +434,86 @@ async def _run_async(fn):
 # ─────────────────────────────────────────
 # ORIGINAL SCREENER HANDLERS
 # ─────────────────────────────────────────
+def _fmt_num_short(v: float) -> str:
+    if v >= 1_000_000_000: return f"{v/1_000_000_000:.2f}B"
+    if v >= 1_000_000:     return f"{v/1_000_000:.2f}M"
+    if v >= 1_000:         return f"{v/1_000:.1f}K"
+    return str(int(v))
+
+
+def _fmt_tg_card(i: int, r: dict) -> str:
+    sign      = "+" if r["gain_pct"] >= 0 else ""
+    breakout  = "YES ✅" if r["breakout"] else "NO"
+    dist_sign = "+" if r["dist_ma20"] >= 0 else ""
+    vol_lots  = int(r["vol_lots"])
+
+    return (
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🏆 *TOP GAINER #{i} — {r['ticker']}*\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"\n"
+        f"*Ticker:* {r['ticker']}\n"
+        f"*Current Price:* {int(r['close'])} IDR\n"
+        f"*Change %:* {sign}{r['gain_pct']:.2f}%\n"
+        f"*Transaction Value:* {_fmt_num_short(r['trans_val'])}\n"
+        f"*Volume:* {vol_lots:,} lots\n"
+        f"*Frequency:* N/A _(intraday data unavailable)_\n"
+        f"*Volume Ratio:* {r['vol_ratio']:.2f}x\n"
+        f"*Foreign Flow:* N/A _(RTI data unavailable)_\n"
+        f"*Distance from MA20:* {dist_sign}{r['dist_ma20']:.2f}%\n"
+        f"*Breakout Status:* {breakout}\n"
+        f"\n"
+        f"*Trading Plan:*\n"
+        f"*Entry Zone:* {int(r['entry_lo'])} — {int(r['entry_hi'])}\n"
+        f"*Stop Loss:* {r['sl']}\n"
+        f"*TP1:* {r['tp1']}\n"
+        f"*TP2:* {r['tp2']}\n"
+        f"*Risk/Reward:* 1 : {r['rr_ratio']:.2f}\n"
+    )
+
+
+def format_top_gainer_result(tgr: TopGainerResult) -> str:
+    is_open, mkt_msg = market_status()
+    lines = ["🏆 *TOP GAINER HUNTER*\n"]
+
+    if tgr.matched:
+        lines.append(
+            f"✅ *{len(tgr.matched)} kandidat* dari {tgr.total_fetched} saham\n"
+            f"_Sorted: Transaction Value → Vol Ratio → Gain → Breakout_\n"
+        )
+        for i, r in enumerate(tgr.matched, 1):
+            lines.append(_fmt_tg_card(i, r))
+    else:
+        lines.append(f"⚠️ Scanned {tgr.total_fetched} saham — 0 lolos filter\n")
+
+        # Near miss
+        if tgr.near_miss:
+            n = len(TOP_GAINER_FILTERS)
+            lines.append(f"_Near Miss Top {len(tgr.near_miss)}:_\n")
+            for r in tgr.near_miss:
+                sign = "+" if r["gain_pct"] >= 0 else ""
+                lines.append(
+                    f"  • *{r['ticker']}* — {r['pass_pct']}% ({r['pass_count']}/{n} filter)\n"
+                    f"    {int(r['close'])} IDR  {sign}{r['gain_pct']:.2f}%  "
+                    f"Vol:{r['vol_ratio']:.2f}x"
+                )
+
+        # Debug filter counts
+        if tgr.filter_counts:
+            lines.append("\n📊 *Pass Rate per Filter:*")
+            lines.append(f"Total: {tgr.total_fetched}  Valid: {tgr.total_valid}  Lolos: {tgr.total_passed}\n")
+            for label, count in tgr.filter_counts.items():
+                pct = int(count / max(tgr.total_valid, 1) * 100)
+                bar = "█" * (pct // 10) + "░" * (10 - pct // 10)
+                safe = label.replace("*", "").replace("_", "").replace("`", "")
+                lines.append(f"{safe}: {pct}% {bar}")
+
+    if not is_open:
+        lines.append(f"\n_{mkt_msg}_")
+
+    return "\n".join(lines)
+
+
 async def big_accumulation_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     msg = await update.message.reply_text(
         f"⏳ Scanning *{len(STOCK_UNIVERSE)} saham* untuk BIG ACCUMULATION …",
@@ -475,6 +559,21 @@ async def ara_hunter_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 # ─────────────────────────────────────────
 # MULTI SCREENER HANDLERS
 # ─────────────────────────────────────────
+async def top_gainer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    msg = await update.message.reply_text(
+        f"⏳ Scanning *{len(STOCK_UNIVERSE)} saham* untuk TOP GAINER HUNTER …",
+        parse_mode="Markdown",
+    )
+    try:
+        loop = asyncio.get_event_loop()
+        tgr  = await loop.run_in_executor(None, screen_top_gainer_hunter)
+        text = format_top_gainer_result(tgr)
+    except Exception as e:
+        logger.error(f"top_gainer_handler: {e}", exc_info=True)
+        text = "❌ Error saat scan TOP GAINER HUNTER. Coba lagi."
+    await send_or_edit(msg, text, parse_mode="Markdown", reply_markup=get_keyboard())
+
+
 async def multi_screener_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     _, _, auto_status = get_auto_mode()
     await update.message.reply_text(
@@ -623,6 +722,7 @@ def build_app() -> Application:
     app.add_handler(MessageHandler(filters.Regex(r"BIG ACCUMULATION"),  big_accumulation_handler))
     app.add_handler(MessageHandler(filters.Regex(r"^📈 BSJP$"),          bsjp_handler))
     app.add_handler(MessageHandler(filters.Regex(r"ARA HUNTER"),         ara_hunter_handler))
+    app.add_handler(MessageHandler(filters.Regex(r"TOP GAINER HUNTER"), top_gainer_handler))
 
     # Multi screener sub-options (specific first)
     app.add_handler(MessageHandler(filters.Regex(r"MS:BSJP"),            ms_bsjp_handler))
