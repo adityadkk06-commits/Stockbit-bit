@@ -4,8 +4,8 @@ Completely independent module. Does NOT modify any existing screener.
 Uses Yahoo Finance OHLCV data only.
 
 Filters applied:
-  Price 50–500 IDR | Change >2% | Vol Ratio >1.5x
-  Transaction Value 3B–10B IDR | Volume 300K–500K lots
+  Price 50–5000 IDR | Change >2% | Vol Ratio >1.5x
+  Transaction Value > 3B IDR | Volume > 100K lots (liquid threshold)
   Close > MA20 | Today's High = 20-day Rolling High (breakout)
 
 Filters NOT available from Yahoo Finance daily OHLCV:
@@ -17,23 +17,13 @@ import logging
 import numpy as np
 import pandas as pd
 from fetcher import fetch_all
+from utils import _f
 from config import STOCK_UNIVERSE
 
 logger = logging.getLogger(__name__)
 
 TG_MAX_RESULTS  = 10
 TG_NEAR_MISS    = 5
-
-
-# ─────────────────────────────────────────────────────────────────
-# SAFE HELPERS
-# ─────────────────────────────────────────────────────────────────
-def _f(val, fb: float = 0.0) -> float:
-    try:
-        v = float(val)
-        return fb if (np.isnan(v) or np.isinf(v)) else v
-    except Exception:
-        return fb
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -140,13 +130,17 @@ def _build_tg_row(ticker: str, df: pd.DataFrame) -> dict | None:
 # ─────────────────────────────────────────────────────────────────
 # FILTERS
 # Each entry: (label, fn(row) -> bool)
+#
+# Vol lots range widened from 300K–500K (too narrow for IDX universe)
+# to > 100K lots, which still ensures adequate liquidity.
+# Price range widened to 50–5000 to cover more liquid mid-caps.
 # ─────────────────────────────────────────────────────────────────
 TOP_GAINER_FILTERS = [
-    ("Price 50–500",          lambda r: 50 <= r["close"] <= 500),
+    ("Price 50–5000",         lambda r: 50 <= r["close"] <= 5000),
     ("Change > 2%",           lambda r: r["gain_pct"] > 2.0),
     ("Vol Ratio > 1.5x",      lambda r: r["vol_ratio"] >= 1.5),
-    ("TransVal 3B–10B",       lambda r: 3_000_000_000 <= r["trans_val"] <= 10_000_000_000),
-    ("Vol 300K–500K lots",    lambda r: 300_000 <= r["vol_lots"] <= 500_000),
+    ("TransVal > 3B",         lambda r: r["trans_val"] >= 3_000_000_000),
+    ("Vol > 100K lots",       lambda r: r["vol_lots"] >= 100_000),
     ("Close > MA20",          lambda r: r["ma20"] > 0 and r["close"] > r["ma20"]),
     ("20D High Breakout",     lambda r: r["breakout"]),
 ]
@@ -157,7 +151,6 @@ TOP_GAINER_FILTERS = [
 # 1. Transaction Value  2. Volume Ratio  3. Gain %  4. Breakout bonus
 # ─────────────────────────────────────────────────────────────────
 def _tg_score(row: dict) -> float:
-    # Normalised 0–100 score
     tv_score  = min(40, max(0, (row["trans_val"] - 3e9) / 175_000_000))
     vr_score  = min(30, max(0, (row["vol_ratio"]  - 1.5) * 15))
     gain_scr  = min(20, max(0, (row["gain_pct"]   - 2.0) * 5))

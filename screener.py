@@ -7,6 +7,7 @@ import logging
 import numpy as np
 import pandas as pd
 from fetcher import fetch_all
+from utils import _f, _ratio
 from config import (
     STOCK_UNIVERSE,
     BIG_ACCUM_FILTERS, BSJP_FILTERS, ARA_FILTERS,
@@ -14,22 +15,6 @@ from config import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-# ─────────────────────────────────────────────────────────────────
-# SAFE VALUE HELPER
-# ─────────────────────────────────────────────────────────────────
-def _f(val, fb: float = 0.0) -> float:
-    try:
-        v = float(val)
-        return fb if (np.isnan(v) or np.isinf(v)) else v
-    except Exception:
-        return fb
-
-
-def _ratio(num, den, fb: float = 0.0) -> float:
-    n, d = _f(num), _f(den)
-    return fb if d == 0 else n / d
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -84,9 +69,9 @@ def build_row(ticker: str, df: pd.DataFrame) -> tuple[dict | None, str]:
         accum  = _f(lat["AccumScore"])
 
         gain_pct          = ((close - prev_c) / prev_c) * 100
-        vol_ma5_vs_ma20   = _ratio(vma5, vma20, fb=0.0)   # VolMA5 / VolMA20
-        vol_today_vs_ma20 = _ratio(volume, vma20, fb=0.0)  # Today vol / VolMA20
-        vol_today_vs_prev = _ratio(volume, prev_v, fb=0.0) # Today vol / Prev vol
+        vol_ma5_vs_ma20   = _ratio(vma5,   vma20)   # VolMA5 / VolMA20
+        vol_today_vs_ma20 = _ratio(volume, vma20)   # Today vol / VolMA20
+        vol_today_vs_prev = _ratio(volume, prev_v)  # Today vol / Prev vol
 
         row = dict(
             ticker=ticker,

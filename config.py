@@ -85,9 +85,8 @@ STOCK_UNIVERSE = sorted(set([
 # Download settings
 # ─────────────────────────────────────────
 DATA_PERIOD       = "6mo"   # Historical data period (longer = more MA50 data)
-DATA_INTERVAL     = "1d"    # Candle interval
+DATA_INTERVAL     = "1d"    # Candle interval (used by fetcher URL)
 MIN_ROWS          = 55      # Minimum candle rows needed (covers MA50)
-BATCH_SIZE        = 50      # Tickers per yfinance batch download
 RETRY_ATTEMPTS    = 2       # Retries on failed individual download
 RETRY_DELAY_SEC   = 1.5     # Seconds between retries
 

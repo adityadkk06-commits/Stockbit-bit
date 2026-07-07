@@ -8,27 +8,12 @@ import numpy as np
 import pandas as pd
 from datetime import datetime, timezone, timedelta
 from fetcher import fetch_all
+from utils import _f, _ratio
 from config import STOCK_UNIVERSE, MAX_RESULTS, TP_PERCENT, SL_PERCENT
 
 logger = logging.getLogger(__name__)
 
 WIB = timezone(timedelta(hours=7))
-
-# ─────────────────────────────────────────────────────────────────
-# SAFE VALUE HELPER
-# ─────────────────────────────────────────────────────────────────
-def _f(val, fb: float = 0.0) -> float:
-    try:
-        v = float(val)
-        return fb if (np.isnan(v) or np.isinf(v)) else v
-    except Exception:
-        return fb
-
-
-def _ratio(num, den, fb: float = 0.0) -> float:
-    n, d = _f(num), _f(den)
-    return fb if d == 0 else n / d
-
 
 # ─────────────────────────────────────────────────────────────────
 # AUTO MODE: TIME-BASED SCREENER SELECTION (WIB)
@@ -106,16 +91,18 @@ def compute_multi_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df["ATR"]   = tr.rolling(14).mean()
     df["ATR10"] = tr.rolling(10).mean()
 
-    # ADX (14)
-    plus_dm  = h.diff().clip(lower=0)
-    minus_dm = (-l.diff()).clip(lower=0)
-    mask_p   = plus_dm < minus_dm;  plus_dm[mask_p]  = 0
-    mask_m   = minus_dm <= plus_dm; minus_dm[mask_m] = 0
-    atr14    = tr.rolling(14).sum().replace(0, np.nan)
-    plus_di  = 100 * plus_dm.rolling(14).sum() / atr14
-    minus_di = 100 * minus_dm.rolling(14).sum() / atr14
-    dx       = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan)
-    df["ADX"] = dx.rolling(14).mean()
+    # ADX (14) — use .where() to avoid chained-assignment warnings
+    h_diff       = h.diff()
+    l_diff       = -l.diff()
+    plus_dm_raw  = h_diff.clip(lower=0)
+    minus_dm_raw = l_diff.clip(lower=0)
+    plus_dm      = plus_dm_raw.where(plus_dm_raw >= minus_dm_raw, 0.0)
+    minus_dm     = minus_dm_raw.where(minus_dm_raw > plus_dm_raw, 0.0)
+    atr14        = tr.rolling(14).sum().replace(0, np.nan)
+    plus_di      = 100 * plus_dm.rolling(14).sum() / atr14
+    minus_di     = 100 * minus_dm.rolling(14).sum() / atr14
+    dx           = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan)
+    df["ADX"]    = dx.rolling(14).mean()
 
     df["IntradayRange"] = ((h - l) / l.replace(0, np.nan)) * 100
     df["VWAP"]          = (h + l + c) / 3
@@ -314,9 +301,13 @@ def _scalping_score(row: dict) -> int:
 
 # ─────────────────────────────────────────────────────────────────
 # SCREENER D: SWING NIGHT GW (Afternoon Session — 14:30–16:00 WIB)
+#
+# Note: MarketCap filter removed — Yahoo Finance returns 0 for most
+# IDX stocks, making the filter ineffective. Replaced with a
+# transaction Value > 5B IDR filter derived from OHLCV data.
 # ─────────────────────────────────────────────────────────────────
 SWING_NIGHT_GW_FILTERS = [
-    ("MarketCap > 1T",         lambda r, _: r["market_cap"] > 1_000_000_000_000),
+    ("Value > 5B IDR",         lambda r, _: r["value"] > 5_000_000_000),
     ("Price 50–5000",          lambda r, _: 50 <= r["close"] <= 5000),
     ("Volume > 5M",            lambda r, _: r["volume"] >= 5_000_000),
     ("Range/ATR10 < 90%",      lambda r, _: 0 < r["range_atr10"] < 0.9),
@@ -385,7 +376,7 @@ def _run_multi(name: str, filter_list: list, score_fn) -> MultiScanResult:
     # Per-filter pass count tracking
     filter_pass_counts = {label: 0 for label, _ in filter_list}
 
-    # Near-miss: (filters_passed_count, pct, row)
+    # Near-miss: (filters_passed_count, row)
     near_candidates: list[tuple[int, dict]] = []
 
     for ticker, df in stock_data.items():
@@ -399,8 +390,8 @@ def _run_multi(name: str, filter_list: list, score_fn) -> MultiScanResult:
         sr.total_valid += 1
 
         # Run each filter individually, track counts
-        passed_count   = 0
-        first_fail     = None
+        passed_count = 0
+        first_fail   = None
         for label, fn in filter_list:
             try:
                 ok = fn(row, df)

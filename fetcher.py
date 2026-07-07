@@ -6,11 +6,12 @@ Uses concurrent ThreadPoolExecutor for fast parallel downloads.
 
 import time
 import logging
+import threading
 import requests
 import pandas as pd
 import numpy as np
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from config import DATA_PERIOD, MIN_ROWS, RETRY_ATTEMPTS, RETRY_DELAY_SEC
+from config import DATA_PERIOD, DATA_INTERVAL, MIN_ROWS, RETRY_ATTEMPTS, RETRY_DELAY_SEC
 
 logger = logging.getLogger(__name__)
 
@@ -31,11 +32,16 @@ _HEADERS = {
 _SESSION = requests.Session()
 _SESSION.headers.update(_HEADERS)
 
+# ── Short-lived cache: avoids re-downloading data within the same minute ──
+_CACHE:     dict[str, tuple[float, pd.DataFrame]] = {}
+_CACHE_TTL: float = 60.0          # seconds
+_CACHE_LOCK = threading.Lock()
 
-def _yahoo_url(symbol: str) -> str:
+
+def _yahoo_url(symbol: str, host: str = "query1") -> str:
     return (
-        f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
-        f"?range={DATA_PERIOD}&interval=1d&includePrePost=false"
+        f"https://{host}.finance.yahoo.com/v8/finance/chart/{symbol}"
+        f"?range={DATA_PERIOD}&interval={DATA_INTERVAL}&includePrePost=false"
     )
 
 
@@ -48,11 +54,11 @@ def _parse_chart(symbol: str, data: dict) -> pd.DataFrame | None:
             logger.debug(f"[PARSE] {symbol} — no result: {err}")
             return None
 
-        chart   = result[0]
-        meta    = chart.get("meta", {})
+        chart      = result[0]
+        meta       = chart.get("meta", {})
         market_cap = float(meta.get("regularMarketCap", 0) or 0)
         timestamps = chart.get("timestamp", [])
-        quote   = chart.get("indicators", {}).get("quote", [{}])[0]
+        quote      = chart.get("indicators", {}).get("quote", [{}])[0]
         adjclose_list = (
             chart.get("indicators", {})
             .get("adjclose", [{}])[0]
@@ -70,7 +76,7 @@ def _parse_chart(symbol: str, data: dict) -> pd.DataFrame | None:
         volumes = quote.get("volume", [None] * len(timestamps))
 
         # Use adjclose if available, else close
-        adj     = adjclose_list if adjclose_list else closes
+        adj = adjclose_list if adjclose_list else closes
 
         df = pd.DataFrame({
             "Open":   [float(v) if v is not None else np.nan for v in opens],
@@ -82,7 +88,7 @@ def _parse_chart(symbol: str, data: dict) -> pd.DataFrame | None:
 
         df.index = df.index.normalize()                # Strip time, keep date
         df = df[~df.index.duplicated(keep="last")]     # Remove duplicate dates
-        df = df.dropna(subset=["Close", "Volume"])     # Drop rows with missing core data
+        df = df.dropna(subset=["Close", "Volume"])     # Drop rows missing core data
         df = df.sort_index()
         df["MarketCap"] = market_cap                   # IDR from Yahoo meta
 
@@ -94,38 +100,51 @@ def _parse_chart(symbol: str, data: dict) -> pd.DataFrame | None:
 
 def _fetch_one(ticker: str, attempt: int = 0) -> tuple[str, pd.DataFrame | None]:
     """Download OHLCV data for a single IDX ticker (appends .JK automatically)."""
+    # ── Cache hit ──
+    with _CACHE_LOCK:
+        entry = _CACHE.get(ticker)
+        if entry is not None:
+            ts, df = entry
+            if time.monotonic() - ts < _CACHE_TTL:
+                return ticker, df.copy()
+            del _CACHE[ticker]
+
     symbol = f"{ticker}.JK"
-    url    = _yahoo_url(symbol)
 
-    try:
-        resp = _SESSION.get(url, timeout=15)
+    # Try query1 first, fall back to query2 on failure
+    for host in ("query1", "query2"):
+        url = _yahoo_url(symbol, host)
+        try:
+            resp = _SESSION.get(url, timeout=15)
+            if resp.status_code == 200:
+                data = resp.json()
+                df   = _parse_chart(symbol, data)
+                if df is not None and len(df) >= MIN_ROWS:
+                    with _CACHE_LOCK:
+                        _CACHE[ticker] = (time.monotonic(), df)
+                    return ticker, df
+                # got a response but insufficient data — no point retrying other host
+                rows = len(df) if df is not None else 0
+                logger.debug(f"[SKIP] {ticker} — {rows} rows (need {MIN_ROWS})")
+                return ticker, None
+            logger.debug(f"[FETCH] {ticker} HTTP {resp.status_code} via {host}")
+        except Exception as e:
+            logger.debug(f"[FETCH] {ticker} via {host} error: {e}")
 
-        if resp.status_code != 200:
-            logger.debug(f"[FETCH] {ticker} HTTP {resp.status_code}")
-            raise ValueError(f"HTTP {resp.status_code}")
+    # Both hosts failed — retry with delay
+    if attempt < RETRY_ATTEMPTS - 1:
+        time.sleep(RETRY_DELAY_SEC)
+        return _fetch_one(ticker, attempt + 1)
 
-        data = resp.json()
-        df   = _parse_chart(symbol, data)
-
-        if df is None or len(df) < MIN_ROWS:
-            rows = len(df) if df is not None else 0
-            logger.debug(f"[SKIP] {ticker} — {rows} rows (need {MIN_ROWS})")
-            return ticker, None
-
-        return ticker, df
-
-    except Exception as e:
-        if attempt < RETRY_ATTEMPTS - 1:
-            time.sleep(RETRY_DELAY_SEC)
-            return _fetch_one(ticker, attempt + 1)
-        logger.debug(f"[FAIL] {ticker} after {RETRY_ATTEMPTS} attempts: {e}")
-        return ticker, None
+    logger.debug(f"[FAIL] {ticker} after {RETRY_ATTEMPTS} attempts")
+    return ticker, None
 
 
-def fetch_all(universe: list[str], max_workers: int = 12) -> dict[str, pd.DataFrame]:
+def fetch_all(universe: list[str], max_workers: int = 15) -> dict[str, pd.DataFrame]:
     """
     Concurrently fetch OHLCV data for all tickers in the universe.
     Returns {ticker: DataFrame} for successfully downloaded stocks.
+    Cache avoids re-downloading within 60 seconds.
     """
     total   = len(universe)
     results = {}
