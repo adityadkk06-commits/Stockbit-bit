@@ -1,0 +1,39 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    name: Deploy bot to server
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          script: |
+            set -e
+
+            # ── Pull latest code ──────────────────────────────────
+            cd ~/Stockbit-bit
+            git pull origin main
+
+            # ── Install / update dependencies ─────────────────────
+            pip install -r requirements.txt --quiet
+
+            # ── Restart the bot (systemd service) ─────────────────
+            # If you are using a different process manager (screen,
+            # supervisor, pm2, etc.) replace these two lines.
+            sudo systemctl restart stockbit-bot
+            sudo systemctl status stockbit-bot --no-pager
+
+            echo "✅ Deploy complete"

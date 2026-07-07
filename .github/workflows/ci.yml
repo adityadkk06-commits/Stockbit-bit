@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-and-check:
+    name: Syntax & import check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Syntax check (all modules)
+        run: |
+          python -m py_compile \
+            utils.py \
+            config.py \
+            fetcher.py \
+            screener.py \
+            multi_screener.py \
+            top_gainer.py \
+            accumulation_screener.py \
+            main.py
+          echo "✅ All files compile cleanly"
+
+      - name: Import check (no token needed)
+        env:
+          TELEGRAM_BOT_TOKEN: dummy-token-for-import-check
+        run: |
+          python -c "
+          import utils, config, fetcher, screener
+          import multi_screener, top_gainer, accumulation_screener
+          print('✅ All imports OK')
+          "
