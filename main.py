@@ -25,6 +25,7 @@ from multi_screener import (
     MultiScanResult,
     BSJP_FILTERS_MULTI, HYBRID_FILTERS, SCALPING_FILTERS, SWING_NIGHT_GW_FILTERS,
 )
+from accumulation_screener import screen_accumulation, AccumResult
 
 # ─────────────────────────────────────────
 # Logging Setup
@@ -358,6 +359,74 @@ def format_auto_result(mode_key: str, status_msg: str,
     return "\n".join(lines)
 
 
+# ─────────────────────────────────────────
+# FORMATTER — Accumulation Screener
+# ─────────────────────────────────────────
+def _fmt_accum_card(i: int, r: dict) -> str:
+    sign     = "+" if r["gain_pct"] >= 0 else ""
+    tags_str = "  ".join(r["tags"]) if r["tags"] else "—"
+    bb_str   = f"{r['bb_pct']:.0f}th pct" if r["bb_pct"] is not None else "N/A"
+    cross    = "✅" if r["fresh_cross"] else "—"
+    ad       = "✅" if r["ad_streak"] else "—"
+    return (
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🔍 *ACCUM #{i} — {r['ticker']}*\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"\n"
+        f"*Price:* {int(r['close'])} IDR  ({sign}{r['gain_pct']:.2f}%)\n"
+        f"*Vol Ratio:* {r['vol_ratio']:.2f}× MA20\n"
+        f"*Value:* {fmt_num(r['value'])}\n"
+        f"*BB Width:* {bb_str}  _(coiling = breakout potential)_\n"
+        f"*Fresh MA20 Cross:* {cross}\n"
+        f"*A/D Streak:* {ad} _(proxy — RTI foreign data N/A)_\n"
+        f"\n"
+        f"*Score:* {r['score']}/85\n"
+        f"*Tags:* _{tags_str}_\n"
+        f"\n"
+        f"*TP:* {r['tp']}  *SL:* {r['sl']}\n"
+    )
+
+
+def format_accum_result(ar: AccumResult) -> str:
+    is_open, mkt_msg = market_status()
+    lines = ["🔍 *ACCUMULATION SCREENER*\n"
+             "_Early accumulation — volume up, price still quiet_\n"]
+
+    if ar.matched:
+        lines.append(
+            f"✅ *{len(ar.matched)} kandidat* dari {ar.total_fetched} saham\n"
+            f"_Sorted by Score — nilai tertinggi = akumulasi terkuat_\n"
+        )
+        for i, r in enumerate(ar.matched, 1):
+            lines.append(_fmt_accum_card(i, r))
+    else:
+        lines.append(f"⚠️ Scanned {ar.total_fetched} saham — 0 kandidat ditemukan\n")
+        if ar.skip_reasons:
+            top = sorted(ar.skip_reasons.items(), key=lambda x: -x[1])[:4]
+            lines.append("_Filter paling ketat:_")
+            for reason, count in top:
+                lines.append(f"  • {reason}: {count} saham")
+        if ar.near_miss:
+            lines.append("\n_Near Miss (vol spike + quiet price, score < 60):_")
+            for r in ar.near_miss:
+                sign = "+" if r["gain_pct"] >= 0 else ""
+                lines.append(
+                    f"  • *{r['ticker']}* {int(r['close'])} IDR  "
+                    f"{sign}{r['gain_pct']:.2f}%  "
+                    f"Vol:{r['vol_ratio']:.1f}×  Score:{r['score']}"
+                )
+
+    lines.append(
+        "\n_⚠️ freq & foreign net buy data tidak tersedia dari Yahoo Finance._\n"
+        "_A/D Line digunakan sebagai proxy akumulasi institusional._"
+    )
+
+    if not is_open:
+        lines.append(f"\n_{mkt_msg}_")
+
+    return "\n".join(lines)
+
+
 def _fmt_tg_card(i: int, r: dict) -> str:
     sign      = "+" if r["gain_pct"] >= 0 else ""
     breakout  = "YES ✅" if r["breakout"] else "NO"
@@ -437,7 +506,7 @@ def get_keyboard() -> ReplyKeyboardMarkup:
         [
             [KeyboardButton("🔥 BIG ACCUMULATION"), KeyboardButton("📈 BSJP")],
             [KeyboardButton("🚀 ARA HUNTER"),        KeyboardButton("📊 MULTI SCREENER")],
-            [KeyboardButton("🏆 TOP GAINER HUNTER")],
+            [KeyboardButton("🏆 TOP GAINER HUNTER"), KeyboardButton("🔍 ACCUM SCREENER")],
         ],
         resize_keyboard=True,
         one_time_keyboard=False,
@@ -488,7 +557,8 @@ async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "📖 *Panduan Screener IDX*\n\n"
         "🔥 *BIG ACCUMULATION* — Saham < 500, A/D kuat, vol surge\n"
         "📈 *BSJP* — Vol > 2x MA20, gain > 1%, MA20 > MA50\n"
-        "🚀 *ARA HUNTER* — Gain > 5%, close > open, above MA5\n\n"
+        "🚀 *ARA HUNTER* — Gain > 5%, close > open, above MA5\n"
+        "🔍 *ACCUM SCREENER* — Vol spike tapi harga masih sepi (smart money diam-diam masuk)\n\n"
         "📊 *MULTI SCREENER*\n"
         "• 🤖 AUTO — Otomatis sesuai jam WIB\n"
         "  09:15–11:00 = ⚡ Scalping\n"
@@ -581,6 +651,20 @@ async def top_gainer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         logger.error(f"top_gainer_handler: {e}", exc_info=True)
         text = "❌ Error saat scan TOP GAINER HUNTER. Coba lagi."
     await send_or_edit(msg, text, parse_mode="Markdown", reply_markup=get_keyboard())
+
+
+async def accum_screener_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    msg = await update.message.reply_text(
+        f"⏳ Scanning *{len(STOCK_UNIVERSE)} saham* untuk ACCUMULATION SCREENER …",
+        parse_mode="Markdown",
+    )
+    try:
+        ar   = await _run_async(screen_accumulation)
+        text = format_accum_result(ar)
+    except Exception as e:
+        logger.error(f"accum_screener_handler: {e}", exc_info=True)
+        text = "❌ Error saat scan ACCUMULATION SCREENER. Coba lagi."
+    await send_or_edit(msg, text, parse_mode="Markdown")
 
 
 async def multi_screener_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -727,6 +811,7 @@ def build_app() -> Application:
     app.add_handler(MessageHandler(filters.Regex(r"^📈 BSJP$"),          bsjp_handler))
     app.add_handler(MessageHandler(filters.Regex(r"ARA HUNTER"),         ara_hunter_handler))
     app.add_handler(MessageHandler(filters.Regex(r"TOP GAINER HUNTER"), top_gainer_handler))
+    app.add_handler(MessageHandler(filters.Regex(r"ACCUM SCREENER"),    accum_screener_handler))
 
     # Multi screener sub-options (specific first)
     app.add_handler(MessageHandler(filters.Regex(r"MS:BSJP"),            ms_bsjp_handler))
