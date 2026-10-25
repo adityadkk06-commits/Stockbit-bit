@@ -1,0 +1,63 @@
+name: IDX Scan
+
+on:
+  schedule:
+    # Cron pakai UTC. WIB = UTC+7
+    - cron: "45 8 * * 1-5"   # 15.45 WIB -> BSJP (sebelum tutup)
+    - cron: "30 9 * * 1-5"   # 16.30 WIB -> swing (setelah tutup)
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Mode scan"
+        required: true
+        default: "bsjp"
+        type: choice
+        options:
+          - bsjp
+          - swing
+          - scalping
+
+permissions:
+  contents: write
+
+concurrency:
+  group: idx-scan
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Tentukan mode
+        id: mode
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            M="${{ inputs.mode }}"
+          elif [ "${{ github.event.schedule }}" = "45 8 * * 1-5" ]; then
+            M="bsjp"
+          else
+            M="swing"
+          fi
+          echo "mode=$M" >> "$GITHUB_OUTPUT"
+
+      - name: Jalankan scan
+        run: python run_scan.py ${{ steps.mode.outputs.mode }}
+
+      - name: Simpan hasil ke repo
+        run: |
+          git config user.name "scan-bot"
+          git config user.email "scan-bot@users.noreply.github.com"
+          git add results*.json
+          git diff --staged --quiet || git commit -m "scan ${{ steps.mode.outputs.mode }} $(date -u +%F)"
+          git push
